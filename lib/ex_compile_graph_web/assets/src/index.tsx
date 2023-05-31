@@ -17,13 +17,15 @@ type ApiResponseMap = {
 type ApiResponse = unknown;
 
 export type Graph = Vertex[];
+export type VertexId = string;
+export type DependencyType = "runtime" | "exports" | "compile";
+
 type RecompileDepedencyReason =
   | "compile"
   | "exports_then_compile"
   | "exports"
   | "compile_then_runtime";
 
-type VertexId = string;
 type Vertex = {
   id: VertexId;
   edges: Edge[];
@@ -33,7 +35,7 @@ type Vertex = {
 type Edge = {
   from: VertexId;
   to: VertexId;
-  dependency_type: "runtime" | "exports" | "compile";
+  dependency_type: DependencyType;
 };
 
 class ApiBase {

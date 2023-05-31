@@ -2,16 +2,19 @@ import React, { useEffect, useRef } from "react";
 import { Spinner } from "@blueprintjs/core";
 import * as d3 from "d3";
 
-import type { Graph } from "./index";
+import type { Graph, VertexId, DependencyType } from "./index";
 
 interface IProps {
   loading?: boolean;
   data: Graph | null;
 }
 
+type LinkType = "oneWay" | "twoWaySameType" | "twoWayDifferentType";
+type LinkStyle = "line" | "arc";
+
 const COLOR_BY_DEPENDENCY = {
   runtime: "#999999",
-  exports: "#FFE569",
+  exports: "#FFCD00",
   compile: "#DB005B",
 };
 
@@ -44,6 +47,7 @@ function ForceGraph(
     linkStrokeLinecap = "round", // link stroke linecap
     linkDistance = 50,
     linkStrength,
+    linkStyle, // given d in links, return render style of links (LinkStyle)
     colors = d3.schemeTableau10, // an array of color strings, for the node groups
     width = 640, // outer width, in pixels
     height = 400, // outer height, in pixels
@@ -61,7 +65,6 @@ function ForceGraph(
     typeof linkStrokeWidth !== "function"
       ? null
       : d3.map(links, linkStrokeWidth);
-  console.log(nodes, "nodes");
   const NR =
     typeof nodeRadius !== "function" ? null : d3.map(nodes, nodeRadius);
   const L = typeof linkStroke !== "function" ? null : d3.map(links, linkStroke);
@@ -80,7 +83,7 @@ function ForceGraph(
   const color = nodeGroup === null ? null : d3.scaleOrdinal(nodeGroups, colors);
 
   // Construct the forces.
-  const forceNode = d3.forceManyBody();
+  const forceNode = d3.forceManyBody().strength(-150);
   const forceLink = d3
     .forceLink(links)
     .id(({ index: i }) => N[i])
@@ -126,6 +129,7 @@ function ForceGraph(
 
   const link = svg
     .append("g")
+    .attr("fill", "none")
     .attr("stroke", typeof linkStroke !== "function" ? linkStroke : null)
     .attr("stroke-opacity", linkStrokeOpacity)
     .attr(
@@ -135,7 +139,7 @@ function ForceGraph(
     .attr("stroke-linecap", linkStrokeLinecap)
     .selectAll("line")
     .data(links)
-    .join("line")
+    .join("path")
     .attr("marker-end", (d) => {
       return LA[d.index];
     });
@@ -178,13 +182,34 @@ function ForceGraph(
       : value;
   }
 
-  function ticked() {
-    link
-      .attr("x1", (d) => d.source.x)
-      .attr("y1", (d) => d.source.y)
-      .attr("x2", (d) => d.target.x)
-      .attr("y2", (d) => d.target.y);
+  function linkArc(d) {
+    const dx = d.target.x - d.source.x;
+    const dy = d.target.y - d.source.y;
+    const dr = Math.sqrt(dx * dx + dy * dy);
+    return `M ${d.source.x},${d.source.y} A ${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
+  }
 
+  function linkLine(d) {
+    return `M ${d.source.x},${d.source.y} L ${d.target.x},${d.target.y}`;
+  }
+
+  function ticked() {
+    // link
+    //   .attr("x1", (d) => d.source.x)
+    //   .attr("y1", (d) => d.source.y)
+    //   .attr("x2", (d) => d.target.x)
+    //   .attr("y2", (d) => d.target.y);
+
+    // link.attr("d", linkArc);
+    link.attr("d", (d) => {
+      const style: LinkStyle = linkStyle ? linkStyle(d) : "line";
+      switch (style) {
+        case "line":
+          return linkLine(d);
+        case "arc":
+          return linkArc(d);
+      }
+    });
     node.attr("cx", (d) => d.x).attr("cy", (d) => d.y);
   }
 
@@ -260,6 +285,8 @@ const GraphView = (props: IProps) => {
         }
       }
 
+      const linkTypeTable = categorizedLinks(props.data);
+
       const { width, height } = container.current.getBoundingClientRect();
       const chart = ForceGraph(
         { nodes: vertices, links: edges },
@@ -277,9 +304,8 @@ const GraphView = (props: IProps) => {
               assertElementType(title, title instanceof HTMLSpanElement);
               assertElementType(subtitle, subtitle instanceof HTMLSpanElement);
 
-              console.log("im here in mouseover");
               tooltipEl.style.left = `${event.clientX - 70}px`;
-              tooltipEl.style.top = `${event.clientY - 70}px`;
+              tooltipEl.style.top = `${event.clientY - 80}px`;
               tooltipEl.style.display = "flex";
               title.innerText = d.id;
               subtitle.innerText = `Recompile degree: ${d.recompileEdgeDegree}`;
@@ -291,13 +317,30 @@ const GraphView = (props: IProps) => {
 
             if (tooltipEl) {
               assertElementType(tooltipEl, tooltipEl instanceof HTMLDivElement);
-              console.log("im here in mouseout");
               tooltipEl.style.display = "none";
             }
           },
           nodeRadius: (d) => {
             const base = 5;
             return base + d.recompileEdgeDegree * 2;
+          },
+          linkStyle: (d) => {
+            const linkType = getTableValue(
+              linkTypeTable,
+              d.source.id,
+              d.target.id
+            );
+
+            switch (linkType) {
+              case "oneWay":
+                return "line";
+              case "twoWaySameType":
+                return "line";
+              case "twoWayDifferentType":
+                return "arc";
+              default:
+                return "line";
+            }
           },
           linkStrokeWidth: 4,
           linkStrokeOpacity: 1,
@@ -309,8 +352,6 @@ const GraphView = (props: IProps) => {
       );
 
       container.current?.appendChild(chart);
-
-      console.log(props.data, "graph");
     }
   }, [props.data, container.current]);
 
@@ -324,6 +365,96 @@ const GraphView = (props: IProps) => {
     </div>
   );
 };
+
+function getTableValue<V, T extends Map<VertexId, Record<VertexId, V>>>(
+  table: T,
+  from: VertexId,
+  to: VertexId
+): V | null {
+  const values = table.get(from);
+  return values ? values[to] : null;
+}
+
+function setTableValue<V, T extends Map<VertexId, Record<VertexId, V>>>(
+  table: T,
+  from: VertexId,
+  to: VertexId,
+  value: V
+) {
+  const map = table.get(from);
+  if (map) map[to] = value;
+  else {
+    table.set(from, { [to]: value });
+  }
+}
+
+function categorizedLinks(
+  graph: Graph
+): Map<VertexId, Record<VertexId, LinkType>> {
+  const dependencyTypeTable = new Map<
+    VertexId,
+    Record<VertexId, DependencyType>
+  >();
+  const linkTypeTable = new Map<VertexId, Record<VertexId, LinkType>>();
+
+  for (const vertex of graph) {
+    for (const edge of vertex.edges) {
+      setTableValue<DependencyType, typeof dependencyTypeTable>(
+        dependencyTypeTable,
+        edge.from,
+        edge.to,
+        edge.dependency_type
+      );
+
+      const reverseLinkDependencyType = getTableValue<
+        DependencyType,
+        typeof dependencyTypeTable
+      >(dependencyTypeTable, edge.to, edge.from);
+      if (
+        reverseLinkDependencyType &&
+        reverseLinkDependencyType === edge.dependency_type
+      ) {
+        // Update both current and reverse link
+        setTableValue<LinkType, typeof linkTypeTable>(
+          linkTypeTable,
+          edge.from,
+          edge.to,
+          "twoWaySameType"
+        );
+        setTableValue<LinkType, typeof linkTypeTable>(
+          linkTypeTable,
+          edge.to,
+          edge.from,
+          "twoWaySameType"
+        );
+      } else if (reverseLinkDependencyType) {
+        // Update both current and reverse link
+        setTableValue<LinkType, typeof linkTypeTable>(
+          linkTypeTable,
+          edge.from,
+          edge.to,
+          "twoWayDifferentType"
+        );
+        setTableValue<LinkType, typeof linkTypeTable>(
+          linkTypeTable,
+          edge.to,
+          edge.from,
+          "twoWayDifferentType"
+        );
+      } else {
+        // No reverse link
+        setTableValue<LinkType, typeof linkTypeTable>(
+          linkTypeTable,
+          edge.from,
+          edge.to,
+          "oneWay"
+        );
+      }
+    }
+  }
+
+  return linkTypeTable;
+}
 
 function assertElementType(
   element: Element,
