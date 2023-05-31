@@ -1,0 +1,42 @@
+@import "normalize.css";
+@import "@blueprintjs/core/lib/css/blueprint.css";
+@import "@blueprintjs/icons/lib/css/blueprint-icons.css";
+
+#app {
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  font-size: 16px;
+}
+
+.graph-view {
+  flex: 1;
+  background-color: #f4f5f6;
+  position: relative;
+}
+
+.graph-view-loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  backdrop-filter: blur(4px);
+}
+
+.graph-tooltip {
+  position: absolute;
+  display: none;
+  flex-direction: column;
+  line-height: 1.5rem;
+  background-color: #404854;
+  color: #f6f7f9;
+  padding: 6px 12px;
+}
+
+.side-panel {
+  flex: 1;
+  flex-shrink: 1;
+  min-width: 300px;
+  max-width: 500px;
+}

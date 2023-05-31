@@ -53,5 +53,16 @@ defmodule ExCompileGraph.Graph do
     graph
   end
 
-  defdelegate vertices(graph), to: :digraph
+  def summarize(graph) do
+    :digraph.vertices(graph)
+    |> Enum.map(fn vertex ->
+      edges =
+        for e <- :digraph.out_edges(graph, vertex) do
+          {_, from_vertex, to_vertex, label} = :digraph.edge(graph, e)
+          %{from: from_vertex, to: to_vertex, dependency_type: label}
+        end
+
+      %{id: vertex, edges: edges}
+    end)
+  end
 end

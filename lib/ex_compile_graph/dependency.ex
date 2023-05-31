@@ -30,6 +30,12 @@ defmodule ExCompileGraph.Dependency do
   @doc """
   Returns all files which have a recompile dependency to the target file
   """
+  @spec recompile_dependencies(:digraph.graph(), ExCompileGraph.file_path()) :: %{
+          compile: MapSet.t(),
+          exports_then_compile: MapSet.t(),
+          exports: MapSet.t(),
+          compile_then_runtime: MapSet.t()
+        }
   def recompile_dependencies(graph, target_file) do
     compile_sources = find_source_files(graph, target_file, :compile)
 
@@ -59,17 +65,24 @@ defmodule ExCompileGraph.Dependency do
   @spec find_source_files(:digraph.graph(), binary(), dependency_type, direct_only?: boolean) ::
           MapSet.t()
   def find_source_files(graph, sink_file, dependency_type, opts \\ []),
-    do: find_source_files(graph, sink_file, dependency_type, MapSet.new(), opts)
+    do: find_source_files(graph, sink_file, dependency_type, {MapSet.new(), sink_file}, opts)
 
-  defp find_source_files(graph, sink_file, dependency_type, result, opts) do
+  defp find_source_files(graph, sink_file, dependency_type, state, opts) do
+    {result, initial_vertex} = state
     direct_only? = Keyword.get(opts, :direct_only?, false)
 
     source_files =
       :digraph.in_edges(graph, sink_file)
       |> Enum.flat_map(fn edge ->
         case :digraph.edge(graph, edge) do
-          {_, source, _, ^dependency_type} -> [source]
-          _ -> []
+          {_, source, _, ^dependency_type} ->
+            # Ignore visited vertex and our inital vertex. Otherwise, we go into a infinite loop
+            if MapSet.member?(result, source) or source == initial_vertex,
+              do: [],
+              else: [source]
+
+          _ ->
+            []
         end
       end)
 
@@ -81,7 +94,7 @@ defmodule ExCompileGraph.Dependency do
         Enum.reduce(
           source_files,
           result,
-          &find_source_files(graph, &1, dependency_type, &2, opts)
+          &find_source_files(graph, &1, dependency_type, {&2, initial_vertex}, opts)
         )
   end
 
