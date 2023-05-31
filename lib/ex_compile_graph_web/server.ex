@@ -5,7 +5,7 @@ defmodule ExCompileGraphWeb.Server do
     Plug.Static,
     at: "/public",
     from: {:ex_compile_graph, "priv/static"},
-    only: ~w(favicon.ico index.html index.js index.css)
+    only: ~w(favicon.ico index.html index.js index.css prism.js prism.css)
   )
 
   plug(:match)

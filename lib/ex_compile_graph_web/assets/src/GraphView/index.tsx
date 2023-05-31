@@ -1,8 +1,11 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Spinner } from "@blueprintjs/core";
 import * as d3 from "d3";
 
-import type { Graph, VertexId, DependencyType } from "./index";
+import GraphLegend from "./GraphLegend";
+import ExplainDialog from "./ExplainDialog";
+import type { Graph, VertexId, DependencyType } from "../index";
+import type { DialogPage } from "./ExplainDialog";
 
 interface IProps {
   loading?: boolean;
@@ -12,7 +15,7 @@ interface IProps {
 type LinkType = "oneWay" | "twoWaySameType" | "twoWayDifferentType";
 type LinkStyle = "line" | "arc";
 
-const COLOR_BY_DEPENDENCY = {
+export const COLOR_BY_DEPENDENCY = {
   runtime: "#999999",
   exports: "#FFCD00",
   compile: "#DB005B",
@@ -242,7 +245,7 @@ function ForceGraph(
 }
 
 const GraphView = (props: IProps) => {
-  const container = useRef<HTMLDivElement>();
+  const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (props.data && container.current) {
@@ -355,6 +358,9 @@ const GraphView = (props: IProps) => {
     }
   }, [props.data, container.current]);
 
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogPage, setDialogPage] = useState<DialogPage | undefined>();
+
   return (
     <div className="graph-view" ref={container}>
       {props.loading && <Spinner className="graph-view-loading" />}
@@ -362,6 +368,21 @@ const GraphView = (props: IProps) => {
         <span className="graph-tooltip-title"></span>
         <span className="graph-tooltip-subtitle"></span>
       </div>
+      <GraphLegend
+        onExplainRequest={(page) => {
+          setDialogPage(page);
+          setDialogOpen(true);
+        }}
+      />
+      <ExplainDialog
+        open={dialogOpen}
+        page={dialogPage}
+        onPageChange={setDialogPage}
+        onClose={() => {
+          setDialogOpen(false);
+          setDialogPage(undefined);
+        }}
+      />
     </div>
   );
 };

@@ -8,6 +8,7 @@ build_assets:
 	cd $(ASSETS_DIR) && rollup -c
 	cp $(ASSETS_DIR)/src/index.html $(SERVE_ASSETS_DIR)
 	cp $(ASSETS_DIR)/src/index.css $(SERVE_ASSETS_DIR)
+	cp -r $(ASSETS_DIR)/src/prism/* $(SERVE_ASSETS_DIR)
 
 clean_assets:
 	rm -rf $(SERVE_ASSETS_DIR)
