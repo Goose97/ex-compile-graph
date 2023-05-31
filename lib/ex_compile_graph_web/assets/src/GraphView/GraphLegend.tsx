@@ -1,11 +1,14 @@
 import React, { useState } from "react";
-import { Icon } from "@blueprintjs/core";
+import { Icon, Switch } from "@blueprintjs/core";
 
 import { COLOR_BY_DEPENDENCY } from "./index";
+import type { DependencyType } from "../index";
 import type { DialogPage } from "./ExplainDialog";
 
 interface IProps {
   onExplainRequest?: (page: DialogPage) => void;
+  dependencyFilter: Record<DependencyType, boolean>;
+  onDependencyFilterToggle?: (value: boolean, type: DependencyType) => void;
 }
 
 const GraphLegend = (props: IProps) => {
@@ -80,6 +83,7 @@ const GraphLegend = (props: IProps) => {
             description = "Runtime dependency";
             break;
         }
+
         return (
           <span key={type}>
             <svg viewBox="0 0 80 20" width="100px" height="20px">
@@ -93,6 +97,7 @@ const GraphLegend = (props: IProps) => {
             </svg>
 
             <span
+              className="graph-legend-dependency-type"
               style={{ borderBottom: "2px dotted", cursor: "pointer" }}
               onClick={() => {
                 let explainPage: DialogPage;
@@ -115,6 +120,15 @@ const GraphLegend = (props: IProps) => {
             >
               {description}
             </span>
+
+            <Switch
+              className="graph-legend-switch"
+              checked={props.dependencyFilter[type as DependencyType]}
+              onChange={(e) => {
+                const value = e.currentTarget.checked;
+                props.onDependencyFilterToggle?.(value, type as DependencyType);
+              }}
+            />
           </span>
         );
       })}

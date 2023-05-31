@@ -68,6 +68,18 @@
   cursor: pointer;
 }
 
+.graph-legend-dependency-type {
+  border-bottom: 2px dotted;
+  cursor: pointer;
+  width: 140px;
+  display: inline-block;
+}
+
+.graph-legend-switch {
+  display: inline-block;
+  margin-left: 8px;
+}
+
 .explain-dialog {
   font-size: 16px;
   line-height: 1.65rem;

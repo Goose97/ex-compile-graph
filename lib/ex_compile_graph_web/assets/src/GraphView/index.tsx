@@ -15,7 +15,7 @@ interface IProps {
 type LinkType = "oneWay" | "twoWaySameType" | "twoWayDifferentType";
 type LinkStyle = "line" | "arc";
 
-export const COLOR_BY_DEPENDENCY = {
+export const COLOR_BY_DEPENDENCY: Record<DependencyType, string> = {
   runtime: "#999999",
   exports: "#FFCD00",
   compile: "#DB005B",
@@ -197,13 +197,6 @@ function ForceGraph(
   }
 
   function ticked() {
-    // link
-    //   .attr("x1", (d) => d.source.x)
-    //   .attr("y1", (d) => d.source.y)
-    //   .attr("x2", (d) => d.target.x)
-    //   .attr("y2", (d) => d.target.y);
-
-    // link.attr("d", linkArc);
     link.attr("d", (d) => {
       const style: LinkStyle = linkStyle ? linkStyle(d) : "line";
       switch (style) {
@@ -241,11 +234,33 @@ function ForceGraph(
       .on("end", dragended);
   }
 
-  return Object.assign(svg.node(), { scales: { color } });
+  return {
+    svg: Object.assign(svg.node(), { scales: { color } }),
+    link,
+    node,
+  };
+}
+
+function updateLinkFilter(
+  link: any,
+  dependencyTypeFilter: Record<DependencyType, boolean>
+) {
+  link.attr("opacity", (d) => {
+    return dependencyTypeFilter[d.dependencyType as DependencyType] ? 1 : 0;
+  });
 }
 
 const GraphView = (props: IProps) => {
+  const [dependencyTypeFilter, setDependencyTypeFiler] = useState<
+    Record<DependencyType, boolean>
+  >({ compile: true, exports: true, runtime: true });
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogPage, setDialogPage] = useState<DialogPage | undefined>();
+
   const container = useRef<HTMLDivElement>(null);
+
+  const graphComponents = useRef<any>();
 
   useEffect(() => {
     if (props.data && container.current) {
@@ -291,7 +306,7 @@ const GraphView = (props: IProps) => {
       const linkTypeTable = categorizedLinks(props.data);
 
       const { width, height } = container.current.getBoundingClientRect();
-      const chart = ForceGraph(
+      const graph = ForceGraph(
         { nodes: vertices, links: edges },
         {
           nodeId: (d) => d.id,
@@ -354,12 +369,16 @@ const GraphView = (props: IProps) => {
         }
       );
 
-      container.current?.appendChild(chart);
+      container.current?.appendChild(graph.svg);
+      graphComponents.current = graph;
     }
   }, [props.data, container.current]);
 
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [dialogPage, setDialogPage] = useState<DialogPage | undefined>();
+  useEffect(() => {
+    if (graphComponents.current) {
+      updateLinkFilter(graphComponents.current.link, dependencyTypeFilter);
+    }
+  }, [dependencyTypeFilter]);
 
   return (
     <div className="graph-view" ref={container}>
@@ -372,6 +391,14 @@ const GraphView = (props: IProps) => {
         onExplainRequest={(page) => {
           setDialogPage(page);
           setDialogOpen(true);
+        }}
+        dependencyFilter={dependencyTypeFilter}
+        onDependencyFilterToggle={(value, type) => {
+          if (graphComponents.current) {
+            const cloned = { ...dependencyTypeFilter };
+            cloned[type] = value;
+            setDependencyTypeFiler(cloned);
+          }
         }}
       />
       <ExplainDialog
