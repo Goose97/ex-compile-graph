@@ -414,89 +414,62 @@ const GraphView = (props: IProps) => {
   );
 };
 
-function getTableValue<V, T extends Map<VertexId, Record<VertexId, V>>>(
-  table: T,
+type Table<K extends string, V> = Record<K, Record<K, V>>;
+
+function getTableValue<V>(
+  table: Table<VertexId, V>,
   from: VertexId,
   to: VertexId
 ): V | null {
-  const values = table.get(from);
+  const values = table[from];
   return values ? values[to] : null;
 }
 
-function setTableValue<V, T extends Map<VertexId, Record<VertexId, V>>>(
-  table: T,
+function setTableValue<V>(
+  table: Table<VertexId, V>,
   from: VertexId,
   to: VertexId,
   value: V
 ) {
-  const map = table.get(from);
+  const map = table[from];
   if (map) map[to] = value;
   else {
-    table.set(from, { [to]: value });
+    table[from] = { [to]: value };
   }
 }
 
-function categorizedLinks(
-  graph: Graph
-): Map<VertexId, Record<VertexId, LinkType>> {
-  const dependencyTypeTable = new Map<
-    VertexId,
-    Record<VertexId, DependencyType>
-  >();
-  const linkTypeTable = new Map<VertexId, Record<VertexId, LinkType>>();
+function categorizedLinks(graph: Graph): Table<VertexId, LinkType> {
+  const dependencyTypeTable: Table<VertexId, DependencyType> = {};
+  const linkTypeTable: Table<VertexId, LinkType> = {};
 
   for (const vertex of graph) {
     for (const edge of vertex.edges) {
-      setTableValue<DependencyType, typeof dependencyTypeTable>(
+      setTableValue(
         dependencyTypeTable,
         edge.from,
         edge.to,
         edge.dependency_type
       );
 
-      const reverseLinkDependencyType = getTableValue<
-        DependencyType,
-        typeof dependencyTypeTable
-      >(dependencyTypeTable, edge.to, edge.from);
+      const reverseLinkDependencyType = getTableValue(
+        dependencyTypeTable,
+        edge.to,
+        edge.from
+      );
       if (
         reverseLinkDependencyType &&
         reverseLinkDependencyType === edge.dependency_type
       ) {
         // Update both current and reverse link
-        setTableValue<LinkType, typeof linkTypeTable>(
-          linkTypeTable,
-          edge.from,
-          edge.to,
-          "twoWaySameType"
-        );
-        setTableValue<LinkType, typeof linkTypeTable>(
-          linkTypeTable,
-          edge.to,
-          edge.from,
-          "twoWaySameType"
-        );
+        setTableValue(linkTypeTable, edge.from, edge.to, "twoWaySameType");
+        setTableValue(linkTypeTable, edge.to, edge.from, "twoWaySameType");
       } else if (reverseLinkDependencyType) {
         // Update both current and reverse link
-        setTableValue<LinkType, typeof linkTypeTable>(
-          linkTypeTable,
-          edge.from,
-          edge.to,
-          "twoWayDifferentType"
-        );
-        setTableValue<LinkType, typeof linkTypeTable>(
-          linkTypeTable,
-          edge.to,
-          edge.from,
-          "twoWayDifferentType"
-        );
+        setTableValue(linkTypeTable, edge.from, edge.to, "twoWayDifferentType");
+        setTableValue(linkTypeTable, edge.to, edge.from, "twoWayDifferentType");
       } else {
         // No reverse link
-        setTableValue<LinkType, typeof linkTypeTable>(
-          linkTypeTable,
-          edge.from,
-          edge.to,
-          "oneWay"
-        );
+        setTableValue(linkTypeTable, edge.from, edge.to, "oneWay");
       }
     }
   }
