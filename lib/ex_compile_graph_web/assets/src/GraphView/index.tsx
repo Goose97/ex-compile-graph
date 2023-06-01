@@ -158,6 +158,7 @@ function ForceGraph(
     .selectAll("circle")
     .data(nodes)
     .join("circle")
+    .attr("class", "graph-view-vertex")
     .attr("fill", nodeFill)
     .attr("id", ({ index: i }) => N[i])
     .call(drag(simulation))

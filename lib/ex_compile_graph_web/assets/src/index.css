@@ -22,6 +22,20 @@
   position: relative;
 }
 
+.graph-view-vertex {
+  /* References: https://stackoverflow.com/questions/5697067/css-for-grabbing-cursors-drag-drop */
+  cursor: move;
+  cursor: grab;
+  cursor: -moz-grab;
+  cursor: -webkit-grab;
+}
+
+.graph-view-vertex:active {
+  cursor: grabbing;
+  cursor: -moz-grabbing;
+  cursor: -webkit-grabbing;
+}
+
 .loading-mask {
   position: absolute;
   top: 0;
