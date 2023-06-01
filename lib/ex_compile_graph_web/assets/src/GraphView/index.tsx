@@ -9,7 +9,8 @@ import type { DialogPage } from "./ExplainDialog";
 
 interface IProps {
   loading?: boolean;
-  data: Graph | null;
+  data?: Graph;
+  focusedVertex?: VertexId;
 }
 
 type LinkType = "oneWay" | "twoWaySameType" | "twoWayDifferentType";
@@ -20,6 +21,10 @@ export const COLOR_BY_DEPENDENCY: Record<DependencyType, string> = {
   exports: "#FFCD00",
   compile: "#DB005B",
 };
+
+const FOCUS_RING_COLOR = "#30A2FF";
+const FOCUS_RING_DELTA = 6;
+const FOCUS_RING_WIDTH = 3;
 
 // Copyright 2021 Observable, Inc.
 // Released under the ISC license.
@@ -109,10 +114,6 @@ function ForceGraph(
     .attr("viewBox", [-width / 2, -height / 2, width, height])
     .attr("style", "max-width: 100%; height: auto; height: intrinsic;");
 
-  let tooltip = null;
-  let tooltipTitle = null;
-  let tooltipSubtitle = null;
-
   const arrowSize = 3;
   svg
     .append("defs")
@@ -147,15 +148,18 @@ function ForceGraph(
       return LA[d.index];
     });
 
-  const node = svg
+  const nodeContainer = svg
     .append("g")
-    .attr("fill", nodeFill)
     .attr("stroke", nodeStroke)
     .attr("stroke-opacity", nodeStrokeOpacity)
-    .attr("stroke-width", nodeStrokeWidth)
+    .attr("stroke-width", nodeStrokeWidth);
+
+  const node = nodeContainer
     .selectAll("circle")
     .data(nodes)
     .join("circle")
+    .attr("fill", nodeFill)
+    .attr("id", ({ index: i }) => N[i])
     .call(drag(simulation))
     .on("mouseover", (event, d) => {
       if (onMouseOverNode) onMouseOverNode(event, d);
@@ -164,13 +168,12 @@ function ForceGraph(
       if (onMouseOutNode) onMouseOutNode(event, d);
     });
 
-  tooltip = svg.append("g").style("display", "none");
-  const tooltipText = tooltip.append("text").attr("x", "0").attr("y", "0");
-  tooltipTitle = tooltipText.append("tspan").attr("x", "0").attr("dy", "1.2em");
-  tooltipSubtitle = tooltipText
-    .append("tspan")
-    .attr("x", "0")
-    .attr("dy", "1.2em");
+  const focusRing = nodeContainer
+    .append("circle")
+    .attr("display", "none")
+    .attr("stroke-width", FOCUS_RING_WIDTH)
+    .attr("stroke", FOCUS_RING_COLOR)
+    .attr("fill", "none");
 
   if (W) link.attr("stroke-width", ({ index: i }) => W[i]);
   if (L) link.attr("stroke", ({ index: i }) => L[i]);
@@ -238,6 +241,7 @@ function ForceGraph(
     svg: Object.assign(svg.node(), { scales: { color } }),
     link,
     node,
+    focusRing,
   };
 }
 
@@ -248,6 +252,11 @@ function updateLinkFilter(
   link.attr("opacity", (d) => {
     return dependencyTypeFilter[d.dependencyType as DependencyType] ? 1 : 0;
   });
+}
+
+function nodeRadius(d) {
+  const base = 5;
+  return base + d.recompileEdgeDegree * 2;
 }
 
 const GraphView = (props: IProps) => {
@@ -338,9 +347,10 @@ const GraphView = (props: IProps) => {
               tooltipEl.style.display = "none";
             }
           },
-          nodeRadius: (d) => {
-            const base = 5;
-            return base + d.recompileEdgeDegree * 2;
+          nodeRadius,
+          nodeFill: (d) => {
+            if (props.focusedVertex === d.id) return "green";
+            return "currentColor";
           },
           linkStyle: (d) => {
             const linkType = getTableValue(
@@ -380,9 +390,27 @@ const GraphView = (props: IProps) => {
     }
   }, [dependencyTypeFilter]);
 
+  useEffect(() => {
+    if (graphComponents.current) {
+      if (props.focusedVertex) {
+        graphComponents.current.node
+          .filter((d) => d.id === props.focusedVertex)
+          .each((d) => {
+            graphComponents.current.focusRing
+              .attr("r", nodeRadius(d) + FOCUS_RING_DELTA)
+              .attr("cx", d.x)
+              .attr("cy", d.y)
+              .attr("display", "initital");
+          });
+      } else {
+        graphComponents.current.focusRing.attr("display", "none");
+      }
+    }
+  }, [props.focusedVertex]);
+
   return (
     <div className="graph-view" ref={container}>
-      {props.loading && <Spinner className="graph-view-loading" />}
+      {props.loading && <Spinner className="loading-mask" />}
       <div className="graph-tooltip">
         <span className="graph-tooltip-title"></span>
         <span className="graph-tooltip-subtitle"></span>

@@ -119,7 +119,9 @@ const App = () => {
   const { current: api } = useRef(new ApiBase());
 
   const [isLoading, setLoading] = useState(false);
-  const [graph, setGraph] = useState<Graph | null>(null);
+  const [graph, setGraph] = useState<Graph>();
+
+  const [focusedVertex, setFocusedVertex] = useState<VertexId>();
 
   useEffect(() => {
     api.connect(() => {
@@ -136,8 +138,17 @@ const App = () => {
 
   return connected ? (
     <>
-      <GraphView loading={isLoading} data={graph} />
-      <SidePanel />
+      <GraphView
+        loading={isLoading}
+        data={graph}
+        focusedVertex={focusedVertex}
+      />
+      <SidePanel
+        loading={isLoading}
+        data={graph}
+        onHoverVertex={(vertexId) => setFocusedVertex(vertexId)}
+        onUnhoverVertex={() => setFocusedVertex(undefined)}
+      />
     </>
   ) : null;
 };

@@ -9,13 +9,20 @@
   font-size: 16px;
 }
 
+.flex-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
 .graph-view {
   flex: 1;
   background-color: #f4f5f6;
   position: relative;
 }
 
-.graph-view-loading {
+.loading-mask {
   position: absolute;
   top: 0;
   left: 0;
@@ -114,4 +121,39 @@
   flex-shrink: 1;
   min-width: 300px;
   max-width: 500px;
+  position: relative;
+}
+
+.side-panel-header {
+  padding: 0 16px;
+}
+
+.recompiles-dependencies-list {
+  list-style-type: none;
+  padding-left: 0;
+}
+
+.recompiles-dependency-item {
+  padding: 8px 16px;
+  border-bottom: 1px solid #d8dee4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.recompiles-dependency-item:first-child {
+  border-top: 1px solid #d8dee4;
+}
+
+.recompiles-dependency-badge {
+  background-color: rgba(175, 184, 193, 0.2);
+  padding: 0 8px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-variant: tabular-nums;
 }
