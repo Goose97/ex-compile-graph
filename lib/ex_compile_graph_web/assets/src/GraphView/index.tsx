@@ -4,13 +4,18 @@ import * as d3 from "d3";
 
 import GraphLegend from "./GraphLegend";
 import ExplainDialog from "./ExplainDialog";
+import { recompileDenpendencies } from "../index";
 import type { Graph, VertexId, DependencyType } from "../index";
 import type { DialogPage } from "./ExplainDialog";
 
 interface IProps {
   loading?: boolean;
-  data?: Graph;
+  graph?: Graph;
   focusedVertex?: VertexId;
+  highlightVercies?: VertexId[];
+  onSelectVertex?: (vertex: VertexId) => void;
+  dependencyTypeFilter: Record<DependencyType, boolean>;
+  onDependencyFiltersChange?: (value: boolean, type: DependencyType) => void;
 }
 
 type LinkType = "oneWay" | "twoWaySameType" | "twoWayDifferentType";
@@ -47,6 +52,7 @@ function ForceGraph(
     nodeStrength,
     onMouseOverNode, // a callback trigger when move mouse over nodes
     onMouseOutNode, // a callback trigger when move mouse out of nodes
+    onClickNode, // a callback trigger when click on nodes
     linkSource = ({ source }) => source, // given d in links, returns a node identifier string
     linkTarget = ({ target }) => target, // given d in links, returns a node identifier string
     linkStroke = "#999", // link stroke color
@@ -91,7 +97,7 @@ function ForceGraph(
   const color = nodeGroup === null ? null : d3.scaleOrdinal(nodeGroups, colors);
 
   // Construct the forces.
-  const forceNode = d3.forceManyBody().strength(-150);
+  const forceNode = d3.forceManyBody();
   const forceLink = d3
     .forceLink(links)
     .id(({ index: i }) => N[i])
@@ -162,6 +168,9 @@ function ForceGraph(
     .attr("fill", nodeFill)
     .attr("id", ({ index: i }) => N[i])
     .call(drag(simulation))
+    .on("click", (event, d) => {
+      if (onClickNode) onClickNode(event, d);
+    })
     .on("mouseover", (event, d) => {
       if (onMouseOverNode) onMouseOverNode(event, d);
     })
@@ -250,9 +259,33 @@ function updateLinkFilter(
   link: any,
   dependencyTypeFilter: Record<DependencyType, boolean>
 ) {
-  link.attr("opacity", (d) => {
-    return dependencyTypeFilter[d.dependencyType as DependencyType] ? 1 : 0;
+  link.attr("display", (d) => {
+    return dependencyTypeFilter[d.dependencyType as DependencyType]
+      ? "initial"
+      : "none";
   });
+}
+
+// If highlightNodes is empty, it means everything is highlighted
+function updateNodeHighlight(
+  node: any,
+  link: any,
+  highlightNodes?: VertexId[]
+) {
+  if (highlightNodes) {
+    const set = new Set(highlightNodes);
+    node.attr("display", (d) => {
+      return set.has(d.id) ? "initial" : "none";
+    });
+
+    // Only links that link between highlighted nodes get highlighted
+    link.attr("display", (d) => {
+      return set.has(d.source.id) && set.has(d.target.id) ? "initial" : "none";
+    });
+  } else {
+    node.attr("display", () => "initial");
+    link.attr("display", () => "initial");
+  }
 }
 
 function nodeRadius(d) {
@@ -261,10 +294,6 @@ function nodeRadius(d) {
 }
 
 const GraphView = (props: IProps) => {
-  const [dependencyTypeFilter, setDependencyTypeFiler] = useState<
-    Record<DependencyType, boolean>
-  >({ compile: true, exports: true, runtime: true });
-
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogPage, setDialogPage] = useState<DialogPage | undefined>();
 
@@ -273,15 +302,15 @@ const GraphView = (props: IProps) => {
   const graphComponents = useRef<any>();
 
   useEffect(() => {
-    if (props.data && container.current) {
-      const vertices = props.data.map((vertex) => ({
+    if (props.graph && container.current) {
+      const vertices = props.graph.map((vertex) => ({
         id: vertex.id,
         name: vertex.id,
-        recompileEdgeDegree: vertex.recompile_dependencies.length,
+        recompileEdgeDegree: recompileDenpendencies(vertex).length,
       }));
 
       const edges = [];
-      for (const vertex of props.data) {
+      for (const vertex of props.graph) {
         // If a vertex has multiple edges to the same vertex, pick the one with highest precedent
         vertex.edges.sort((e1, e2) => {
           if (e1.to === e2.to) {
@@ -313,7 +342,7 @@ const GraphView = (props: IProps) => {
         }
       }
 
-      const linkTypeTable = categorizedLinks(props.data);
+      const linkTypeTable = categorizedLinks(props.graph);
 
       const { width, height } = container.current.getBoundingClientRect();
       const graph = ForceGraph(
@@ -322,6 +351,10 @@ const GraphView = (props: IProps) => {
           nodeId: (d) => d.id,
           nodeGroup: null,
           nodeTitle: null,
+          nodeStrength: -50,
+          onClickNode: (_event, d) => {
+            props.onSelectVertex?.(d.id);
+          },
           onMouseOverNode: (event, d) => {
             const tooltipEl =
               document.getElementsByClassName("graph-tooltip")[0];
@@ -383,13 +416,16 @@ const GraphView = (props: IProps) => {
       container.current?.appendChild(graph.svg);
       graphComponents.current = graph;
     }
-  }, [props.data, container.current]);
+  }, [props.graph, container.current]);
 
   useEffect(() => {
     if (graphComponents.current) {
-      updateLinkFilter(graphComponents.current.link, dependencyTypeFilter);
+      updateLinkFilter(
+        graphComponents.current.link,
+        props.dependencyTypeFilter
+      );
     }
-  }, [dependencyTypeFilter]);
+  }, [props.dependencyTypeFilter]);
 
   useEffect(() => {
     if (graphComponents.current) {
@@ -409,6 +445,16 @@ const GraphView = (props: IProps) => {
     }
   }, [props.focusedVertex]);
 
+  useEffect(() => {
+    if (graphComponents.current) {
+      updateNodeHighlight(
+        graphComponents.current.node,
+        graphComponents.current.link,
+        props.highlightVercies
+      );
+    }
+  }, [props.highlightVercies]);
+
   return (
     <div className="graph-view" ref={container}>
       {props.loading && <Spinner className="loading-mask" />}
@@ -421,14 +467,8 @@ const GraphView = (props: IProps) => {
           setDialogPage(page);
           setDialogOpen(true);
         }}
-        dependencyFilter={dependencyTypeFilter}
-        onDependencyFilterToggle={(value, type) => {
-          if (graphComponents.current) {
-            const cloned = { ...dependencyTypeFilter };
-            cloned[type] = value;
-            setDependencyTypeFiler(cloned);
-          }
-        }}
+        dependencyFilter={props.dependencyTypeFilter}
+        onDependencyFilterToggle={props.onDependencyFiltersChange}
       />
       <ExplainDialog
         open={dialogOpen}

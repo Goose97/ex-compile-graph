@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, createContext } from "react";
 
 import SidePanel from "./SidePanel";
 import GraphView from "./GraphView";
@@ -7,11 +7,18 @@ import "./index.css";
 
 type ApiRequest =
   | { type: "getGraph" }
-  | { type: "getDependency"; payload: string };
+  | {
+      type: "getDependencyExplanation";
+      payload: {
+        source: VertexId;
+        sink: VertexId;
+        reason: RecompileDepedencyReason;
+      };
+    };
 
 type ApiResponseMap = {
   getGraph: Graph;
-  getDependency: unknown;
+  getDependencyExplanation: RecompileDepedencyExplanation[];
 };
 
 type ApiResponse = unknown;
@@ -20,16 +27,20 @@ export type Graph = Vertex[];
 export type VertexId = string;
 export type DependencyType = "runtime" | "exports" | "compile";
 
-type RecompileDepedencyReason =
+export type RecompileDepedencyReason =
   | "compile"
   | "exports_then_compile"
   | "exports"
   | "compile_then_runtime";
+export type RecompileDenpendency = {
+  id: VertexId;
+  reason: RecompileDepedencyReason;
+};
 
-type Vertex = {
+export type Vertex = {
   id: VertexId;
   edges: Edge[];
-  recompile_dependencies: { id: VertexId; reason: RecompileDepedencyReason }[];
+  recompile_dependencies: RecompileDenpendency[];
 };
 
 type Edge = {
@@ -38,7 +49,22 @@ type Edge = {
   dependency_type: DependencyType;
 };
 
-class ApiBase {
+type LinesSpan = [from: number, to: number];
+
+export type CodeSnippet = {
+  content: string;
+  highlight: LinesSpan;
+  lines_span: LinesSpan;
+};
+
+export type RecompileDepedencyExplanation = {
+  intermediates: VertexId[];
+  source: VertexId;
+  type: DependencyType;
+  snippets: CodeSnippet[];
+};
+
+export class ApiBase {
   socket: WebSocket | null;
   // Should not worry about overflow
   private sequence: number;
@@ -71,8 +97,8 @@ class ApiBase {
             break;
           }
 
-          case "getDependency": {
-            successCb(payload as ApiResponseMap["getDependency"]);
+          case "getDependencyExplanation": {
+            successCb(payload as ApiResponseMap["getDependencyExplanation"]);
             break;
           }
         }
@@ -114,6 +140,46 @@ class ApiBase {
   }
 }
 
+// Perform a DFS on graph but only follow edges satisfy the filter
+function getConnectedVertices(
+  graph: Graph,
+  vertex: Vertex,
+  dependencyTypeFilter: Record<DependencyType, boolean>
+) {
+  const dictionary = new Map<VertexId, Vertex>();
+  for (const vertex of graph) {
+    dictionary.set(vertex.id, vertex);
+  }
+
+  const visited = new Set();
+  const dfs = (vertexId: VertexId): Set<VertexId> => {
+    const result = new Set<VertexId>();
+    if (visited.has(vertexId)) return result;
+
+    visited.add(vertexId);
+    result.add(vertexId);
+
+    const vertex = dictionary.get(vertexId) as Vertex;
+    for (const edge of vertex.edges) {
+      if (dependencyTypeFilter[edge.dependency_type]) {
+        dfs(edge.to).forEach((i) => result.add(i));
+      }
+    }
+
+    return result;
+  };
+
+  return Array.from(dfs(vertex.id));
+}
+
+export function recompileDenpendencies(vertex: Vertex) {
+  return vertex.recompile_dependencies.filter((i) =>
+    ["compile", "compile_then_runtme"].includes(i.reason)
+  );
+}
+
+export const ApiContext = createContext(new ApiBase());
+
 const App = () => {
   const [connected, setConnected] = useState(false);
   const { current: api } = useRef(new ApiBase());
@@ -122,6 +188,10 @@ const App = () => {
   const [graph, setGraph] = useState<Graph>();
 
   const [focusedVertex, setFocusedVertex] = useState<VertexId>();
+  const [selectedVertex, setSelectedVertex] = useState<Vertex>();
+  const [dependencyTypeFilter, setDependencyTypeFilter] = useState<
+    Record<DependencyType, boolean>
+  >({ compile: true, exports: true, runtime: true });
 
   useEffect(() => {
     api.connect(() => {
@@ -136,24 +206,64 @@ const App = () => {
     return api.disconnect;
   }, []);
 
+  console.log("graph", graph);
+
   return connected ? (
-    <>
+    <ApiContext.Provider value={api}>
       <GraphView
         loading={isLoading}
-        data={graph}
+        graph={graph}
         focusedVertex={focusedVertex}
+        onSelectVertex={(vertexId) => {
+          if (graph) {
+            const vertex = graph.find((v) => v.id === vertexId);
+            if (!vertex)
+              throw new Error(
+                `Unexpected vertex ${vertexId} is selected in GraphView`
+              );
+
+            setFocusedVertex(vertex.id);
+            setSelectedVertex(vertex);
+          }
+        }}
+        highlightVercies={
+          graph && selectedVertex
+            ? getConnectedVertices(graph, selectedVertex, dependencyTypeFilter)
+            : undefined
+        }
+        onDependencyFiltersChange={(value, type) => {
+          const clone = { ...dependencyTypeFilter };
+          clone[type] = value;
+          setDependencyTypeFilter(clone);
+        }}
+        dependencyTypeFilter={dependencyTypeFilter}
       />
       <SidePanel
         loading={isLoading}
-        data={graph}
+        graph={graph}
+        selectedVertex={selectedVertex}
+        onSelectVertex={(vertexId) => {
+          if (!vertexId) {
+            setFocusedVertex(undefined);
+            return setSelectedVertex(undefined);
+          }
+
+          if (graph) {
+            const vertex = graph.find((v) => v.id === vertexId);
+            if (!vertex)
+              throw new Error(
+                `Unexpected vertex ${vertexId} is selected in SidePanel`
+              );
+            setFocusedVertex(vertex.id);
+            setSelectedVertex(vertex);
+          }
+        }}
         onHoverVertex={(vertexId) => setFocusedVertex(vertexId)}
         onUnhoverVertex={() => setFocusedVertex(undefined)}
       />
-    </>
+    </ApiContext.Provider>
   ) : null;
 };
-
-// Create your app
 
 // Inject your application into the an element with the id `app`.
 // Make sure that such an element exists in the dom ;)

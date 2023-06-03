@@ -77,7 +77,7 @@ const PAGES: { id: DialogPage; title: string; content: React.ReactElement }[] =
             module B recompiles.
           </p>
 
-          <div className="Code">
+          <div>
             <pre>
               <code className="language-elixir">
                 {compileDependencySnippet}
@@ -102,7 +102,7 @@ const PAGES: { id: DialogPage; title: string; content: React.ReactElement }[] =
             e.g. changes struct definitions or add/remote public functions.
           </p>
 
-          <div className="Code">
+          <div>
             <pre>
               <code className="language-elixir">
                 {exportsDependencySnippet}
@@ -124,7 +124,7 @@ const PAGES: { id: DialogPage; title: string; content: React.ReactElement }[] =
             module B recompiles.
           </p>
 
-          <div className="Code">
+          <div>
             <pre>
               <code className="language-elixir">
                 {runtimeDependencySnippet}

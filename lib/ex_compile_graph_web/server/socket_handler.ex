@@ -1,5 +1,6 @@
 defmodule ExCompileGraphWeb.Server.SocketHandler do
   @behaviour :cowboy_websocket
+  require Logger
 
   def init(request, state) do
     {:cowboy_websocket, request, state}
@@ -20,12 +21,24 @@ defmodule ExCompileGraphWeb.Server.SocketHandler do
         "getGraph" ->
           ExCompileGraph.get_graph()
 
-        "getDependency" ->
-          "OK"
+        "getDependencyExplanation" ->
+          %{"source" => source, "sink" => sink, "reason" => reason} =
+            req_payload["request"]["payload"]
+
+          ExCompileGraph.get_recompile_dependency_causes(source, sink, String.to_atom(reason))
       end
 
     serialized = Jason.encode!(%{sequence: sequence, payload: res_payload})
     {:reply, {:text, serialized}, state}
+  rescue
+    error ->
+      Logger.error("""
+      #{__MODULE__}: error while handling socket requests
+      - error: #{inspect(error, pretty: true)}
+      - request: #{inspect(error, pretty: true)}
+      """)
+
+      {:reply, {:text, ""}, state}
   end
 
   def websocket_info(_info, state) do

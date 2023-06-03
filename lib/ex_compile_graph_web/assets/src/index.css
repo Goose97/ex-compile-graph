@@ -13,7 +13,6 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: center;
 }
 
 .graph-view {
@@ -131,11 +130,27 @@
 }
 
 .side-panel {
-  flex: 1;
   flex-shrink: 1;
-  min-width: 300px;
-  max-width: 500px;
   position: relative;
+  overflow: auto;
+}
+
+@media screen and (min-width: 1600px) {
+  .side-panel {
+    width: 600px;
+  }
+}
+
+@media screen and (min-width: 1200px) and (max-width: 1600px) {
+  .side-panel {
+    width: 450px;
+  }
+}
+
+@media screen and (min-width: 768px) and (max-width: 1200px) {
+  .side-panel {
+    width: 300px;
+  }
 }
 
 .side-panel-header {
@@ -170,4 +185,49 @@
   border-radius: 8px;
   font-weight: 600;
   font-variant: tabular-nums;
+}
+
+.recompiles-dependency-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.recompiles-dependency-item-collapsible {
+  position: relative;
+}
+
+.recompiles-dependency-item-collapsible.active {
+  margin-top: 12px;
+}
+
+.file-name-box {
+  padding: 8px 0;
+  display: inline-block;
+}
+
+.explanation-dependency-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-snippet-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  padding: 8px;
+  border: 1px solid #d8dee4;
+  cursor: pointer;
+}
+
+.code-snippet pre[class*="language-"] {
+  margin: 0px;
+}
+
+/* Custom Prismjs style */
+.line-highlight {
+  background-color: #ffe7a0 !important;
+  opacity: 0.3;
 }

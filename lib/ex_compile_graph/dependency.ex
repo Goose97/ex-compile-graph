@@ -31,28 +31,36 @@ defmodule ExCompileGraph.Dependency do
   Returns all files which have a recompile dependency to the target file
   """
   @spec recompile_dependencies(:digraph.graph(), ExCompileGraph.file_path()) :: %{
-          compile: MapSet.t(),
-          exports_then_compile: MapSet.t(),
-          exports: MapSet.t(),
-          compile_then_runtime: MapSet.t()
+          compile: [{ExCompileGraph.file_path(), dependency_path}],
+          exports_then_compile: [{ExCompileGraph.file_path(), dependency_path}],
+          exports: [{ExCompileGraph.file_path(), dependency_path}],
+          compile_then_runtime: [{ExCompileGraph.file_path(), dependency_path}]
         }
   def recompile_dependencies(graph, target_file) do
     compile_sources = find_source_files(graph, target_file, :compile)
 
     exports_then_compile_sources =
-      Enum.reduce(compile_sources, MapSet.new(), fn file, acc ->
-        find_source_files(graph, file, :exports, direct_only?: true)
-        |> MapSet.union(acc)
+      Enum.reduce(compile_sources, [], fn {file, path}, acc ->
+        result =
+          find_source_files(graph, file, :exports, direct_only?: true)
+          |> Enum.map(fn {file1, path1} -> {file1, path1 ++ path} end)
+
+        acc ++ result
       end)
+      |> Enum.reject(&(elem(&1, 0) == target_file))
 
     exports_sources = find_source_files(graph, target_file, :exports, direct_only?: true)
 
     compile_then_runtime_sources =
       find_source_files(graph, target_file, :runtime)
-      |> Enum.reduce(MapSet.new(), fn file, acc ->
-        find_source_files(graph, file, :compile)
-        |> MapSet.union(acc)
+      |> Enum.reduce([], fn {file, path}, acc ->
+        result =
+          find_source_files(graph, file, :compile)
+          |> Enum.map(fn {file1, path1} -> {file1, path1 ++ path} end)
+
+        acc ++ result
       end)
+      |> Enum.reject(&(elem(&1, 0) == target_file))
 
     %{
       compile: compile_sources,
@@ -62,13 +70,23 @@ defmodule ExCompileGraph.Dependency do
     }
   end
 
+  @type dependency_path :: [{dependency_type, ExCompileGraph.file_path()}]
   @spec find_source_files(:digraph.graph(), binary(), dependency_type, direct_only?: boolean) ::
-          MapSet.t()
-  def find_source_files(graph, sink_file, dependency_type, opts \\ []),
-    do: find_source_files(graph, sink_file, dependency_type, {MapSet.new(), sink_file}, opts)
+          [{ExCompileGraph.file_path(), dependency_path}]
+  @doc """
+  Given a sink file and a graph, find all source files which have a dependency_type on the sink file
+
+  ## Options
+
+    * `direct_only?`: whether to count only direct dependency or include transitive ones. Default: true
+  """
+  def find_source_files(graph, sink_file, dependency_type, opts \\ []) do
+    find_source_files(graph, sink_file, dependency_type, {%{}, sink_file, []}, opts)
+    |> Enum.to_list()
+  end
 
   defp find_source_files(graph, sink_file, dependency_type, state, opts) do
-    {result, initial_vertex} = state
+    {result, initial_vertex, path} = state
     direct_only? = Keyword.get(opts, :direct_only?, false)
 
     source_files =
@@ -77,7 +95,7 @@ defmodule ExCompileGraph.Dependency do
         case :digraph.edge(graph, edge) do
           {_, source, _, ^dependency_type} ->
             # Ignore visited vertex and our inital vertex. Otherwise, we go into a infinite loop
-            if MapSet.member?(result, source) or source == initial_vertex,
+            if Map.has_key?(result, source) or source == initial_vertex,
               do: [],
               else: [source]
 
@@ -86,7 +104,11 @@ defmodule ExCompileGraph.Dependency do
         end
       end)
 
-    result = Enum.reduce(source_files, result, &MapSet.put(&2, &1))
+    result =
+      Enum.reduce(source_files, result, fn file, acc ->
+        path = [{dependency_type, file} | path]
+        Map.put(acc, file, path)
+      end)
 
     if direct_only?,
       do: result,
@@ -94,22 +116,45 @@ defmodule ExCompileGraph.Dependency do
         Enum.reduce(
           source_files,
           result,
-          &find_source_files(graph, &1, dependency_type, {&2, initial_vertex}, opts)
+          fn file, acc ->
+            path = [{dependency_type, file} | path]
+            find_source_files(graph, file, dependency_type, {acc, initial_vertex, path}, opts)
+          end
         )
   end
 
+  @type recompile_dependency_causes_params :: %{
+          source_file: ExCompileGraph.file_path(),
+          sink_file: ExCompileGraph.file_path(),
+          manifest: binary(),
+          reason: :compile | :exports_then_compile | :exports | :compile_then_runtime
+        }
+
   @doc """
-  Given two files and their dependency type, return all the causes for such dependency
+  Given two files which have a recompile dependency, return a detailed explanation of why such
+  dependency exists
+
+  Imagine the relationship likes a chain of files with two tips are our two
+  input files. We will resolves the causes for each link with `dependency_causes/1`
   """
+  def recompile_dependency_causes(%{reason: :exports} = params) do
+  end
+
   @type dependency_causes_params :: %{
-          source_file: binary(),
-          sink_file: binary(),
+          source_file: ExCompileGraph.file_path(),
+          sink_file: ExCompileGraph.file_path(),
           manifest: binary(),
           dependency_type: ExCompileGraph.dependency_type()
         }
   @spec dependency_causes(dependency_causes_params()) :: [
           __MODULE__.Cause.t()
         ]
+
+  @doc """
+  Given two files and their dependency type, return all the causes for such dependency
+
+  Note that this function only accepts direct dependencies
+  """
   # There are 2 sources of exports dependency causes: 1) import and 2) struct usage
   def dependency_causes(%{dependency_type: :exports} = params) do
     %{
@@ -134,7 +179,7 @@ defmodule ExCompileGraph.Dependency do
 
     import_exprs =
       Enum.flat_map(modules, fn module ->
-        exprs = SourceParser.import_exprs(absolute_source_file, module)
+        exprs = SourceParser.scan_module_exprs(absolute_source_file, module, :import)
 
         Enum.flat_map(exprs, fn expr ->
           target_module = SourceParser.import_target(expr)
@@ -190,5 +235,82 @@ defmodule ExCompileGraph.Dependency do
           - sink_file: #{sink_file}
           """
         )
+  end
+
+  # ExCompileGraph.Dependency.dependency_causes(%{
+  #   "reason" => "compile_then_runtime",
+  #   "source" => "lib/fixtures/A3.ex",
+  #   "sink" => "lib/fixtures/B1.ex"
+  # })
+
+  def dependency_causes(%{dependency_type: :compile} = params) do
+    %{
+      source_file: source_file,
+      sink_file: sink_file,
+      manifest: manifest
+    } = params
+
+    file_lookup_table = ExCompileGraph.SourceFile.build_lookup_table(manifest)
+    manifest_lookup_table = Manifest.build_lookup_table(manifest)
+    %{modules: source_modules} = SourceFile.lookup!(file_lookup_table, source_file)
+
+    absolute_source_file =
+      if params[:root_folder],
+        do: Path.join([params[:root_folder], source_file]),
+        else: source_file
+
+    require_list =
+      Enum.flat_map(source_modules, fn module ->
+        SourceParser.scan_module_exprs(absolute_source_file, module, :require)
+        |> Enum.map(&SourceParser.require_target/1)
+      end)
+
+    import_list =
+      Enum.flat_map(source_modules, fn module ->
+        SourceParser.scan_module_exprs(absolute_source_file, module, :import)
+        |> Enum.map(&SourceParser.import_target/1)
+      end)
+
+    # This is a minor optimization. We could check if our sink module gets import/require
+    # If it's not, then we are sure that there're no macro usages
+    %{modules: sink_modules} = SourceFile.lookup!(file_lookup_table, sink_file)
+
+    macro_causes =
+      Enum.filter(sink_modules, &(&1 in require_list or &1 in import_list))
+      |> Enum.flat_map(fn module ->
+        SourceParser.macro_exprs(absolute_source_file, module)
+      end)
+      |> Enum.map(fn expr ->
+        %__MODULE__.Cause{
+          name: :macro,
+          origin_file: source_file,
+          lines_span: SourceParser.expr_lines_span(expr)
+        }
+      end)
+
+    compile_time_invocation_causes =
+      Enum.flat_map(sink_modules, fn module ->
+        SourceParser.compile_invocation_exprs(absolute_source_file, module)
+      end)
+      |> Enum.map(fn expr ->
+        %__MODULE__.Cause{
+          name: :compile_time_invocation,
+          origin_file: source_file,
+          lines_span: SourceParser.expr_lines_span(expr)
+        }
+      end)
+
+    macro_causes ++ compile_time_invocation_causes
+  end
+end
+
+defmodule A do
+  def test do
+    ExCompileGraph.Dependency.dependency_causes(%{
+      dependency_type: :compile,
+      source_file: "lib/fixtures/A3.ex",
+      sink_file: "lib/fixtures/B1.ex",
+      manifest: Mix.Project.manifest_path() <> "/compile.elixir"
+    })
   end
 end

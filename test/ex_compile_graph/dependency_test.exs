@@ -292,6 +292,77 @@ defmodule ExCompileGraph.DependencyTest do
         end
         """,
         "lib/cause/A3.ex"
+      },
+      {
+        """
+        defmodule Cause.A4 do
+          require Cause.A5
+          import Cause.A6
+          alias Cause.A6, as: A6Aliased
+
+          def x(), do: Cause.A5.x()
+          def x1(), do: y()
+
+          def x2() do
+            if 2 > 1 do
+              A6Aliased.y()
+            else
+              nil
+            end
+          end
+        end
+        """,
+        "lib/cause/A4.ex"
+      },
+      {
+        """
+        defmodule Cause.A5 do
+          defmacro x do
+            quote do
+              1 + 1
+            end
+          end
+        end
+        """,
+        "lib/cause/A5.ex"
+      },
+      {
+        """
+        defmodule Cause.A6 do
+          defmacro y do
+            quote do
+              1 + 1
+            end
+          end
+        end
+        """,
+        "lib/cause/A6.ex"
+      },
+      {
+        """
+        defmodule Cause.A7 do
+          alias Cause.A8, as: A8Aliased
+          import Cause.A8
+
+          x()
+
+          Cause.A8.x()
+
+          A8Aliased.y(1)
+
+          def z(), do: x() + y(1)
+        end
+        """,
+        "lib/cause/A7.ex"
+      },
+      {
+        """
+        defmodule Cause.A8 do
+          def x(), do: 1
+          def y(x), do: x + 2
+        end
+        """,
+        "lib/cause/A8.ex"
       }
     ]
 
@@ -305,25 +376,21 @@ defmodule ExCompileGraph.DependencyTest do
                Dependency.find_source_files(graph, "lib/direct/A1.ex", :runtime,
                  direct_only?: true
                )
-               |> to_list()
 
       assert [] =
                Dependency.find_source_files(graph, "lib/direct/A2.ex", :runtime,
                  direct_only?: true
                )
-               |> to_list()
 
-      assert ["lib/direct/A2.ex"] =
+      assert [{"lib/direct/A2.ex", [runtime: "lib/direct/A2.ex"]}] =
                Dependency.find_source_files(graph, "lib/direct/A3.ex", :runtime,
                  direct_only?: true
                )
-               |> to_list()
 
-      assert ["lib/direct/A3.ex"] =
+      assert [{"lib/direct/A3.ex", [runtime: "lib/direct/A3.ex"]}] =
                Dependency.find_source_files(graph, "lib/direct/A4.ex", :runtime,
                  direct_only?: true
                )
-               |> to_list()
     end
 
     # Use source_set_1
@@ -332,23 +399,19 @@ defmodule ExCompileGraph.DependencyTest do
                ExCompileGraph.Dependency.find_source_files(graph, "lib/direct/A1.ex", :exports,
                  direct_only?: true
                )
-               |> to_list()
 
-      assert ["lib/direct/A1.ex"] =
+      assert [{"lib/direct/A1.ex", [exports: "lib/direct/A1.ex"]}] =
                ExCompileGraph.Dependency.find_source_files(graph, "lib/direct/A2.ex", :exports,
                  direct_only?: true
                )
-               |> to_list()
 
       assert [] =
                ExCompileGraph.Dependency.find_source_files(graph, "lib/direct/A3.ex", :exports,
                  direct_only?: true
                )
-               |> to_list()
 
-      assert ["lib/direct/A3.ex"] =
+      assert [{"lib/direct/A3.ex", [exports: "lib/direct/A3.ex"]}] =
                ExCompileGraph.Dependency.find_source_files(graph, "lib/direct/A4.ex", :exports)
-               |> to_list()
     end
 
     # Use source_set_1
@@ -357,98 +420,114 @@ defmodule ExCompileGraph.DependencyTest do
                ExCompileGraph.Dependency.find_source_files(graph, "lib/direct/A1.ex", :compile,
                  direct_only?: true
                )
-               |> to_list()
 
-      assert ["lib/direct/A1.ex"] =
+      assert [{"lib/direct/A1.ex", [compile: "lib/direct/A1.ex"]}] =
                ExCompileGraph.Dependency.find_source_files(graph, "lib/direct/A2.ex", :compile,
                  direct_only?: true
                )
-               |> to_list()
 
       assert [] =
                ExCompileGraph.Dependency.find_source_files(graph, "lib/direct/A3.ex", :compile,
                  direct_only?: true
                )
-               |> to_list()
 
       assert [] =
                ExCompileGraph.Dependency.find_source_files(graph, "lib/direct/A4.ex", :compile,
                  direct_only?: true
                )
-               |> to_list()
     end
 
     # Use source_set_2
     test "Transitive references", %{graph: graph} do
-      assert ["lib/transitive/A1.ex", "lib/transitive/A2.ex"] =
+      assert [
+               {"lib/transitive/A1.ex",
+                [runtime: "lib/transitive/A1.ex", runtime: "lib/transitive/A2.ex"]},
+               {"lib/transitive/A2.ex", [runtime: "lib/transitive/A2.ex"]}
+             ] =
                Dependency.find_source_files(
                  graph,
                  "lib/transitive/A3.ex",
                  :runtime
                )
-               |> to_list()
 
-      assert ["lib/transitive/B1.ex", "lib/transitive/B2.ex"] =
+      assert [
+               {"lib/transitive/B1.ex",
+                [exports: "lib/transitive/B1.ex", exports: "lib/transitive/B2.ex"]},
+               {"lib/transitive/B2.ex", [exports: "lib/transitive/B2.ex"]}
+             ] =
                Dependency.find_source_files(
                  graph,
                  "lib/transitive/B3.ex",
                  :exports
                )
-               |> to_list()
 
-      assert ["lib/transitive/C1.ex", "lib/transitive/C2.ex"] =
+      assert [
+               {"lib/transitive/C1.ex",
+                [compile: "lib/transitive/C1.ex", compile: "lib/transitive/C2.ex"]},
+               {"lib/transitive/C2.ex", [compile: "lib/transitive/C2.ex"]}
+             ] =
                Dependency.find_source_files(
                  graph,
                  "lib/transitive/C3.ex",
                  :compile
                )
-               |> to_list()
     end
   end
 
   # Use source_set_3
   describe "ExCompileGraph.Dependency.recompile_dependencies/2" do
     test "Direct or transitive compile references", %{graph: graph} do
-      assert ["lib/recompile/A1.ex", "lib/recompile/A2.ex"] =
+      assert [
+               {"lib/recompile/A1.ex",
+                [compile: "lib/recompile/A1.ex", compile: "lib/recompile/A2.ex"]},
+               {"lib/recompile/A2.ex", [compile: "lib/recompile/A2.ex"]}
+             ] =
                ExCompileGraph.Dependency.recompile_dependencies(graph, "lib/recompile/A3.ex")
                |> Map.get(:compile)
-               |> to_list()
     end
 
     test "Direct exports references", %{graph: graph} do
-      assert ["lib/recompile/B1.ex"] =
+      assert [{"lib/recompile/B1.ex", [exports: "lib/recompile/B1.ex"]}] =
                ExCompileGraph.Dependency.recompile_dependencies(graph, "lib/recompile/B2.ex")
                |> Map.get(:exports)
-               |> to_list()
 
-      assert ["lib/recompile/B2.ex"] =
+      assert [{"lib/recompile/B2.ex", [exports: "lib/recompile/B2.ex"]}] =
                ExCompileGraph.Dependency.recompile_dependencies(graph, "lib/recompile/B3.ex")
                |> Map.get(:exports)
-               |> to_list()
     end
 
     test "Compile following by runtime references", %{graph: graph} do
-      assert ["lib/recompile/C1.ex"] =
+      assert [
+               {"lib/recompile/C1.ex",
+                [compile: "lib/recompile/C1.ex", runtime: "lib/recompile/C2.ex"]}
+             ] =
                ExCompileGraph.Dependency.recompile_dependencies(graph, "lib/recompile/C3.ex")
                |> Map.get(:compile_then_runtime)
-               |> to_list()
 
-      assert ["lib/recompile/C1.ex"] =
+      assert [
+               {"lib/recompile/C1.ex",
+                [
+                  compile: "lib/recompile/C1.ex",
+                  runtime: "lib/recompile/C2.ex",
+                  runtime: "lib/recompile/C3.ex"
+                ]}
+             ] =
                ExCompileGraph.Dependency.recompile_dependencies(graph, "lib/recompile/C4.ex")
                |> Map.get(:compile_then_runtime)
-               |> to_list()
     end
 
     test "Direct export following by compile references", %{graph: graph} do
-      assert ["lib/recompile/D2.ex"] =
+      assert [
+               {"lib/recompile/D2.ex",
+                [exports: "lib/recompile/D2.ex", compile: "lib/recompile/D3.ex"]}
+             ] =
                ExCompileGraph.Dependency.recompile_dependencies(graph, "lib/recompile/D4.ex")
                |> Map.get(:exports_then_compile)
-               |> to_list()
     end
   end
 
   # Use source_set_4
-  describe "ExCompileGraph.xDependency.dependency_causes/1" do
+  describe "ExCompileGraph.Dependency.dependency_causes/1" do
     test "Exports dependency causes" do
       {:ok, manifest_path} = TestUtils.fixtures_manifest()
 
@@ -487,9 +566,47 @@ defmodule ExCompileGraph.DependencyTest do
                  dependency_type: :exports
                })
     end
-  end
 
-  defp to_list(set), do: set |> MapSet.to_list() |> Enum.sort()
+    test "Compile dependency causes" do
+      {:ok, manifest_path} = TestUtils.fixtures_manifest()
+
+      assert [
+               %Dependency.Cause{name: :macro, lines_span: {6, 6}}
+             ] =
+               Dependency.dependency_causes(%{
+                 root_folder: "test/fixtures",
+                 source_file: "lib/cause/A4.ex",
+                 sink_file: "lib/cause/A5.ex",
+                 manifest: manifest_path,
+                 dependency_type: :compile
+               })
+
+      assert [
+               %Dependency.Cause{name: :macro, lines_span: {7, 7}},
+               %Dependency.Cause{name: :macro, lines_span: {11, 11}}
+             ] =
+               Dependency.dependency_causes(%{
+                 root_folder: "test/fixtures",
+                 source_file: "lib/cause/A4.ex",
+                 sink_file: "lib/cause/A6.ex",
+                 manifest: manifest_path,
+                 dependency_type: :compile
+               })
+
+      assert [
+               %Dependency.Cause{name: :compile_time_invocation, lines_span: {5, 5}},
+               %Dependency.Cause{name: :compile_time_invocation, lines_span: {7, 7}},
+               %Dependency.Cause{name: :compile_time_invocation, lines_span: {9, 9}}
+             ] =
+               Dependency.dependency_causes(%{
+                 root_folder: "test/fixtures",
+                 source_file: "lib/cause/A7.ex",
+                 sink_file: "lib/cause/A8.ex",
+                 manifest: manifest_path,
+                 dependency_type: :compile
+               })
+    end
+  end
 
   defp setup_sources(sources, context) do
     :ok = TestUtils.clear_fixtures()

@@ -3,7 +3,7 @@ defmodule ExCompileGraphWeb.Server do
 
   plug(
     Plug.Static,
-    at: "/public",
+    at: "/",
     from: {:ex_compile_graph, "priv/static"},
     only: ~w(favicon.ico index.html index.js index.css prism.js prism.css)
   )
@@ -12,11 +12,14 @@ defmodule ExCompileGraphWeb.Server do
   plug(:dispatch)
 
   get "/" do
-    send_resp(conn, 200, "hello")
-  end
+    path =
+      Path.join([
+        :code.priv_dir(:ex_compile_graph) |> to_string(),
+        "static",
+        "index.html"
+      ])
 
-  get "/favicon.ico" do
-    send_file(conn, 200, "lib/ex_compile_graph_web/assets/src/favicon.ico")
+    send_file(conn, 200, path)
   end
 
   get "/ws" do

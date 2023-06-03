@@ -113,7 +113,112 @@ defmodule ExCompileGraph.SourceParserTest do
       }
     ]
 
-    setup_sources(sources_set_1 ++ sources_set_2 ++ sources_set_3)
+    sources_set_4 = [
+      {
+        """
+        defmodule MacroExpr.D1 do
+          require MacroExpr.D2
+          import MacroExpr.D3
+
+          def x(), do: MacroExpr.D2.x1() + MacroExpr.D2.x2()
+          def y(), do: y1() + y2()
+        end
+        """,
+        "lib/source_parser/D1.ex"
+      },
+      {
+        """
+        defmodule MacroExpr.D2 do
+          defmacro x1() do
+            quote do
+              1 + 1
+            end
+          end
+
+          defmacro x2() do
+            quote do
+              1 + 1
+            end
+          end
+        end
+        """,
+        "lib/source_parser/D2.ex"
+      },
+      {
+        """
+        defmodule MacroExpr.D3 do
+          defmacro y1() do
+            quote do
+              1 + 1
+            end
+          end
+
+          defmacro y2() do
+            quote do
+              1 + 1
+            end
+          end
+        end
+        """,
+        "lib/source_parser/D3.ex"
+      },
+      {
+        """
+        defmodule MacroExpr.D4 do
+          require MacroExpr.D2
+          require MacroExpr.D3
+          alias MacroExpr.D3
+          alias MacroExpr.D3, as: D3Aliased
+
+          def x(), do: D3.y1()
+          def x1(), do: D3Aliased.y2()
+          def x2(), do: MacroExpr.D2.x1()
+        end
+        """,
+        "lib/source_parser/D4.ex"
+      },
+      {
+        """
+        defmodule MacroExpr.D5 do
+          import MacroExpr.D3
+          def y1(x), do: x + 1
+
+          # Should be arity-aware
+          def x(), do: y1(1)
+
+          def x1(), do: y1
+        end
+        """,
+        "lib/source_parser/D5.ex"
+      }
+    ]
+
+    sources_set_5 = [
+      {
+        """
+        defmodule CompileTimeInvocation.E1 do
+          alias CompileTimeInvocation.E2, as: E2Aliased
+          CompileTimeInvocation.E2.x()
+
+          E2Aliased.x(1)
+        end
+        """,
+        "lib/source_parser/E1.ex"
+      },
+      {
+        """
+        defmodule CompileTimeInvocation.E2 do
+          def x(), do: 1
+          def x(x), do: x + 1
+        end
+        """,
+        "lib/source_parser/E2.ex"
+      }
+    ]
+
+    setup_sources(
+      sources_set_1 ++ sources_set_2 ++ sources_set_3 ++ sources_set_4 ++ sources_set_5
+    )
   end
 
   # Use sources set 1
@@ -164,34 +269,38 @@ defmodule ExCompileGraph.SourceParserTest do
   end
 
   # Use sources set 2
-  describe "ExCompileGraph.SourceParser.import_exprs/2" do
+  describe "ExCompileGraph.SourceParser.scan_module_exprs/3" do
     test "In module top-level" do
       assert [_] =
-               SourceParser.import_exprs(
+               SourceParser.scan_module_exprs(
                  fixtures_path("lib/source_parser/B1.ex"),
-                 Import.B1
+                 Import.B1,
+                 :import
                )
 
       assert [_] =
-               SourceParser.import_exprs(
+               SourceParser.scan_module_exprs(
                  fixtures_path("lib/source_parser/B1.ex"),
-                 Import.B1.Nested
+                 Import.B1.Nested,
+                 :import
                )
     end
 
     test "In module function definitions" do
       assert [_] =
-               SourceParser.import_exprs(
+               SourceParser.scan_module_exprs(
                  fixtures_path("lib/source_parser/B3.ex"),
-                 Import.B3
+                 Import.B3,
+                 :import
                )
     end
 
     test "No import epxressions" do
       assert [] =
-               SourceParser.import_exprs(
+               SourceParser.scan_module_exprs(
                  fixtures_path("lib/source_parser/B2.ex"),
-                 Import.B2
+                 Import.B2,
+                 :import
                )
     end
   end
@@ -258,6 +367,42 @@ defmodule ExCompileGraph.SourceParserTest do
                {StructDef.C3.Deeply, _},
                {StructDef.C3, _}
              ] = SourceParser.struct_defs!(fixtures_path("lib/source_parser/C3.ex"))
+    end
+  end
+
+  # Use sources_set_4
+  describe "ExCompileGraph.SourceParser.macro_exprs/2" do
+    test "With require" do
+      exprs = SourceParser.macro_exprs(fixtures_path("lib/source_parser/D1.ex"), MacroExpr.D2)
+      assert length(exprs) == 2
+    end
+
+    test "With import" do
+      exprs = SourceParser.macro_exprs(fixtures_path("lib/source_parser/D1.ex"), MacroExpr.D3)
+      assert length(exprs) == 2
+    end
+
+    test "With alias" do
+      exprs = SourceParser.macro_exprs(fixtures_path("lib/source_parser/D4.ex"), MacroExpr.D3)
+      assert length(exprs) == 2
+    end
+
+    test "Should be arity-aware" do
+      exprs = SourceParser.macro_exprs(fixtures_path("lib/source_parser/D5.ex"), MacroExpr.D3)
+      assert length(exprs) == 1
+    end
+  end
+
+  # Use sources_set_5
+  describe "ExCompileGraph.SourceParser.compile_invocation_exprs/2" do
+    test "Function calls in module body" do
+      exprs =
+        ExCompileGraph.SourceParser.compile_invocation_exprs(
+          fixtures_path("lib/source_parser/E1.ex"),
+          CompileTimeInvocation.E2
+        )
+
+      assert length(exprs) == 2
     end
   end
 

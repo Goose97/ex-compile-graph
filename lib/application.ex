@@ -6,6 +6,7 @@ defmodule ExCompileGraph.Application do
       {Plug.Cowboy, scheme: :http, plug: ExCompileGraphWeb.Server, port: 4040}
     ]
 
+    ExCompileGraph.init()
     Supervisor.start_link(children, strategy: :one_for_one)
   end
 end
