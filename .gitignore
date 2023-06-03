@@ -1,4 +1,4 @@
-# The directory Mix will write compiled artifacts to.
+gd # The directory Mix will write compiled artifacts to.
 /_build/
 
 # If you run "mix test --cover", coverage assets end up here.
@@ -28,4 +28,6 @@ ex_compile_graph-*.tar
 /test/fixtures/lib
 /test/fixtures/_build
 !mix.exs
-/lib/test
+/lib/fixtures
+/lib/ex_compile_graph_web/assets/node_modules
+/priv
