@@ -32,7 +32,7 @@ const SidePanel = (props: IProps) => {
           key={vertex.id}
           onClick={() => props.onSelectVertex?.(vertex.id)}
           onMouseEnter={() => props.onHoverVertex?.(vertex.id)}
-          onMouseOut={() => props.onUnhoverVertex?.(vertex.id)}
+          onMouseLeave={() => props.onUnhoverVertex?.(vertex.id)}
         >
           <span className="flex-row" style={{ gap: "8px" }}>
             <Icon icon="arrow-right" size={12} />

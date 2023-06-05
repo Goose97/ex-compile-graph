@@ -12,14 +12,12 @@ interface IProps {
   loading?: boolean;
   graph?: Graph;
   focusedVertex?: VertexId;
-  highlightVercies?: VertexId[];
   onSelectVertex?: (vertex: VertexId) => void;
   dependencyTypeFilter: Record<DependencyType, boolean>;
   onDependencyFiltersChange?: (value: boolean, type: DependencyType) => void;
 }
 
 type LinkType = "oneWay" | "twoWaySameType" | "twoWayDifferentType";
-type LinkStyle = "line" | "arc";
 
 export const COLOR_BY_DEPENDENCY: Record<DependencyType, string> = {
   runtime: "#999999",
@@ -27,87 +25,60 @@ export const COLOR_BY_DEPENDENCY: Record<DependencyType, string> = {
   compile: "#DB005B",
 };
 
+const LINK_STROKE_WIDTH = 4;
+const LINK_DISTANCE = 80;
+const NODE_RADIUS_BASE = 5;
+const NODE_RADIUS_GROWTH = 2;
+const NODE_STROKE_WIDTH = 2;
+
 const FOCUS_RING_COLOR = "#30A2FF";
 const FOCUS_RING_DELTA = 6;
 const FOCUS_RING_WIDTH = 3;
 
-// Copyright 2021 Observable, Inc.
-// Released under the ISC license.
-// https://observablehq.com/@d3/force-directed-graph
-function ForceGraph(
-  {
-    nodes, // an iterable of node objects (typically [{id}, …])
-    links, // an iterable of link objects (typically [{source, target}, …])
-  },
-  {
-    nodeId = (d) => d.id, // given d in nodes, returns a unique identifier (string)
-    nodeGroup, // given d in nodes, returns an (ordinal) value for color
-    nodeGroups, // an array of ordinal values representing the node groups
-    nodeTitle, // given d in nodes, a title string
-    nodeFill = "currentColor", // node stroke fill (if not using a group color encoding)
-    nodeStroke = "#fff", // node stroke color
-    nodeStrokeWidth = 1.5, // node stroke width, in pixels
-    nodeStrokeOpacity = 1, // node stroke opacity
-    nodeRadius = 5, // given d in nodes, a radius in pixels
-    nodeStrength,
-    onMouseOverNode, // a callback trigger when move mouse over nodes
-    onMouseOutNode, // a callback trigger when move mouse out of nodes
-    onClickNode, // a callback trigger when click on nodes
-    linkSource = ({ source }) => source, // given d in links, returns a node identifier string
-    linkTarget = ({ target }) => target, // given d in links, returns a node identifier string
-    linkStroke = "#999", // link stroke color
-    linkStrokeOpacity = 0.6, // link stroke opacity
-    linkStrokeWidth = 1.5, // given d in links, returns a stroke width in pixels
-    linkStrokeLinecap = "round", // link stroke linecap
-    linkDistance = 50,
-    linkStrength,
-    linkStyle, // given d in links, return render style of links (LinkStyle)
-    colors = d3.schemeTableau10, // an array of color strings, for the node groups
-    width = 640, // outer width, in pixels
-    height = 400, // outer height, in pixels
-    invalidation, // when this promise resolves, stop the simulation
-  } = {}
-) {
-  // Compute values.
-  const N = d3.map(nodes, nodeId).map(intern);
-  const LS = d3.map(links, linkSource).map(intern);
-  const LT = d3.map(links, linkTarget).map(intern);
-  if (nodeTitle === undefined) nodeTitle = (_, i) => N[i];
-  const T = nodeTitle === null ? null : d3.map(nodes, nodeTitle);
-  const G = nodeGroup === null ? null : d3.map(nodes, nodeGroup).map(intern);
-  const W =
-    typeof linkStrokeWidth !== "function"
-      ? null
-      : d3.map(links, linkStrokeWidth);
-  const NR =
-    typeof nodeRadius !== "function" ? null : d3.map(nodes, nodeRadius);
-  const L = typeof linkStroke !== "function" ? null : d3.map(links, linkStroke);
-  const LA = links.map(
-    (d) => `url(${new URL(`#arrow-${d.dependencyType}`, location)})`
-  );
+type D3Node = {
+  id: VertexId;
+  name: VertexId;
+  recompileEdgeDegree: number;
+};
 
-  // Replace the input nodes and links with mutable objects for the simulation.
-  nodes = d3.map(nodes, (n) => ({ ...n }));
-  links = d3.map(links, (l) => ({ ...l }));
+type AugmentedD3Node = D3Node & {
+  x: number;
+  y: number;
+};
 
-  // Compute default domains.
-  if (G && nodeGroups === undefined) nodeGroups = d3.sort(G);
+type D3Edge = {
+  source: VertexId;
+  target: VertexId;
+  dependencyType: DependencyType;
+};
 
-  // Construct the scales.
-  const color = nodeGroup === null ? null : d3.scaleOrdinal(nodeGroups, colors);
+type AugmentedD3Edge = D3Edge & {
+  source: D3Node;
+  target: D3Node;
+};
 
-  // Construct the forces.
+type RenderGraphParams = {
+  vertices: D3Node[];
+  edges: D3Edge[];
+  width: number;
+  height: number;
+  nodeRadius?: (n: D3Node) => number;
+  linkStyle?: (e: AugmentedD3Edge) => "arc" | "line";
+  onClickNode?: (event: React.MouseEvent, node: D3Node) => void;
+};
+function renderGraph(params: RenderGraphParams) {
+  const { vertices, edges, width, height } = params;
+  const d3Nodes = vertices.map((v) => ({ ...v, index: undefined }));
+  const d3Links = edges.map((e) => ({ ...e }));
+
   const forceNode = d3.forceManyBody();
   const forceLink = d3
-    .forceLink(links)
-    .id(({ index: i }) => N[i])
-    .distance(linkDistance);
+    .forceLink(d3Links)
+    .id((d) => d.id)
+    .distance(LINK_DISTANCE);
 
-  if (nodeStrength !== undefined) forceNode.strength(nodeStrength);
-  if (linkStrength !== undefined) forceLink.strength(linkStrength);
-
-  const simulation = d3
-    .forceSimulation(nodes)
+  let simulation = d3
+    .forceSimulation(d3Nodes)
     .force("link", forceLink)
     .force("charge", forceNode)
     .force("center", d3.forceCenter())
@@ -124,7 +95,7 @@ function ForceGraph(
   svg
     .append("defs")
     .selectAll("marker")
-    .data(["compile", "exports", "runtime"])
+    .data<DependencyType>(["compile", "exports", "runtime"])
     .join("marker")
     .attr("id", (d) => `arrow-${d}`)
     .attr("viewBox", `0 0 ${arrowSize} ${arrowSize}`)
@@ -137,104 +108,188 @@ function ForceGraph(
     .attr("fill", (value) => COLOR_BY_DEPENDENCY[value])
     .attr("d", `M0,0 L${arrowSize},${arrowSize / 2} L0,${arrowSize} z`);
 
-  const link = svg
+  let links = svg
     .append("g")
+    .attr("id", "links-container")
     .attr("fill", "none")
-    .attr("stroke", typeof linkStroke !== "function" ? linkStroke : null)
-    .attr("stroke-opacity", linkStrokeOpacity)
-    .attr(
-      "stroke-width",
-      typeof linkStrokeWidth !== "function" ? linkStrokeWidth : null
-    )
-    .attr("stroke-linecap", linkStrokeLinecap)
+    .attr("stroke-width", LINK_STROKE_WIDTH)
+    .attr("stroke-linecap", "round")
     .selectAll("line")
-    .data(links)
-    .join("path")
-    .attr("marker-end", (d) => {
-      return LA[d.index];
-    });
+    .data(d3Links)
+    .join("path");
+
+  function applyLinkStyle(links: any) {
+    links
+      .attr("stroke", (d: AugmentedD3Edge) => {
+        return COLOR_BY_DEPENDENCY[d.dependencyType];
+      })
+      .attr("marker-end", (d: AugmentedD3Edge) => {
+        const url = new URL(`#arrow-${d.dependencyType}`, window.location.href);
+        return `url(${url})`;
+      })
+      .attr("data-source", (d: AugmentedD3Edge) => d.source.id)
+      .attr("data-target", (d: AugmentedD3Edge) => d.target.id);
+  }
+
+  applyLinkStyle(links);
 
   const nodeContainer = svg
     .append("g")
-    .attr("stroke", nodeStroke)
-    .attr("stroke-opacity", nodeStrokeOpacity)
-    .attr("stroke-width", nodeStrokeWidth);
+    .attr("id", "nodes-container")
+    .attr("stroke", "#fff")
+    .attr("stroke-width", NODE_STROKE_WIDTH);
 
-  const node = nodeContainer
-    .selectAll("circle")
-    .data(nodes)
-    .join("circle")
-    .attr("class", "graph-view-vertex")
-    .attr("fill", nodeFill)
-    .attr("id", ({ index: i }) => N[i])
-    .call(drag(simulation))
-    .on("click", (event, d) => {
-      if (onClickNode) onClickNode(event, d);
-    })
-    .on("mouseover", (event, d) => {
-      if (onMouseOverNode) onMouseOverNode(event, d);
-    })
-    .on("mouseout", (event, d) => {
-      if (onMouseOutNode) onMouseOutNode(event, d);
-    });
+  let nodes = nodeContainer.selectAll("circle").data(d3Nodes).join("circle");
 
-  const focusRing = nodeContainer
+  function applyNodeStyle(nodes: any) {
+    nodes
+      .attr("class", "graph-view-vertex")
+      .attr("fill", "currentColor")
+      .attr("id", (d) => d.id)
+      .attr(
+        "r",
+        (d) => NODE_RADIUS_BASE + d.recompileEdgeDegree * NODE_RADIUS_GROWTH
+      )
+      .attr("fill", "currentColor")
+      .call(drag(simulation))
+      .on("click", (event, d) => params.onClickNode?.(event, d))
+      .on("mouseover", (event, d) => {
+        const tooltipEl = document.getElementsByClassName("graph-tooltip")[0];
+
+        if (tooltipEl) {
+          const [title, subtitle] = Array.from(tooltipEl.children);
+          assertElementType(tooltipEl, tooltipEl instanceof HTMLDivElement);
+          assertElementType(title, title instanceof HTMLSpanElement);
+          assertElementType(subtitle, subtitle instanceof HTMLSpanElement);
+
+          tooltipEl.style.left = `${event.clientX - 70}px`;
+          tooltipEl.style.top = `${event.clientY - 80}px`;
+          tooltipEl.style.display = "flex";
+          title.innerText = d.id;
+          subtitle.innerText = `Recompile degree: ${d.recompileEdgeDegree}`;
+        }
+      })
+      .on("mouseout", () => {
+        const tooltipEl = document.getElementsByClassName("graph-tooltip")[0];
+
+        if (tooltipEl) {
+          assertElementType(tooltipEl, tooltipEl instanceof HTMLDivElement);
+          tooltipEl.style.display = "none";
+        }
+      });
+  }
+
+  applyNodeStyle(nodes);
+
+  const focusRing = svg
     .append("circle")
+    .attr("id", "focus-ring")
     .attr("display", "none")
     .attr("stroke-width", FOCUS_RING_WIDTH)
     .attr("stroke", FOCUS_RING_COLOR)
     .attr("fill", "none");
 
-  if (W) link.attr("stroke-width", ({ index: i }) => W[i]);
-  if (L) link.attr("stroke", ({ index: i }) => L[i]);
-  if (G) node.attr("fill", ({ index: i }) => color(G[i]));
-  if (T) node.append("title").text(({ index: i }) => T[i]);
-  if (NR) node.attr("r", ({ index: i }) => NR[i]);
-  if (invalidation) invalidation.then(() => simulation.stop());
+  function updateEdges(edges: D3Edge[]) {
+    const d3NewLinks = edges.map((e) => ({ ...e }));
 
-  function intern(value) {
-    return value !== null && typeof value === "object"
-      ? value.valueOf()
-      : value;
+    const forceLink = d3
+      .forceLink(d3NewLinks)
+      .id((d) => d.id)
+      .distance(LINK_DISTANCE);
+    simulation = simulation.force("link", forceLink);
+
+    links = links.data(d3NewLinks, function (d: AugmentedD3Edge) {
+      return d
+        ? `${d.source.id}|${d.target.id}`
+        : `${this.dataset.source}|${this.dataset.target}`;
+    });
+
+    applyLinkStyle(links.enter().append("path"));
+    links.exit().remove();
+
+    links = d3.select("#links-container").selectAll("path");
+    ticked();
   }
 
-  function linkArc(d) {
+  function updateNodes(vertices: D3Node[]) {
+    const d3NewNodes = vertices.map((n) => ({ ...n }));
+    simulation = simulation.nodes(d3NewNodes);
+
+    nodes = nodes.data(d3NewNodes, function (d: AugmentedD3Node) {
+      return d ? d.id : this.id;
+    });
+
+    applyNodeStyle(nodes.enter().append("circle"));
+    nodes.exit().remove();
+
+    nodes = d3.select("#nodes-container").selectAll("circle");
+    simulation.alpha(1);
+    simulation.restart();
+  }
+
+  let focusVertex: VertexId | undefined;
+
+  function setFocusVertex(vertex: VertexId | undefined) {
+    focusVertex = vertex;
+    if (focusVertex) ticked();
+    else focusRing.attr("display", "none");
+  }
+
+  function linkArc(d: any) {
     const dx = d.target.x - d.source.x;
     const dy = d.target.y - d.source.y;
     const dr = Math.sqrt(dx * dx + dy * dy);
     return `M ${d.source.x},${d.source.y} A ${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
   }
 
-  function linkLine(d) {
+  function linkLine(d: any) {
     return `M ${d.source.x},${d.source.y} L ${d.target.x},${d.target.y}`;
   }
 
   function ticked() {
-    link.attr("d", (d) => {
-      const style: LinkStyle = linkStyle ? linkStyle(d) : "line";
-      switch (style) {
+    // Update links position
+    links.attr("d", (d) => {
+      const linkStyle = params.linkStyle
+        ? params.linkStyle(d as AugmentedD3Edge)
+        : "line";
+      switch (linkStyle) {
         case "line":
           return linkLine(d);
         case "arc":
           return linkArc(d);
       }
     });
-    node.attr("cx", (d) => d.x).attr("cy", (d) => d.y);
+
+    // Update nodes position
+    nodes.attr("cx", (d: any) => d.x).attr("cy", (d: any) => d.y);
+
+    // Update focus ring position
+    if (focusVertex !== undefined) {
+      nodes
+        .filter((n) => n.id === focusVertex)
+        .each((n) => {
+          focusRing
+            .attr("cx", n.x)
+            .attr("cy", n.y)
+            .attr("r", nodeRadius(n) + FOCUS_RING_DELTA)
+            .attr("display", "initial");
+        });
+    }
   }
 
-  function drag(simulation) {
-    function dragstarted(event) {
+  function drag(simulation: any) {
+    function dragstarted(event: any) {
       if (!event.active) simulation.alphaTarget(0.3).restart();
       event.subject.fx = event.subject.x;
       event.subject.fy = event.subject.y;
     }
 
-    function dragged(event) {
+    function dragged(event: any) {
       event.subject.fx = event.x;
       event.subject.fy = event.y;
     }
 
-    function dragended(event) {
+    function dragended(event: any) {
       if (!event.active) simulation.alphaTarget(0);
       event.subject.fx = null;
       event.subject.fy = null;
@@ -248,44 +303,11 @@ function ForceGraph(
   }
 
   return {
-    svg: Object.assign(svg.node(), { scales: { color } }),
-    link,
-    node,
-    focusRing,
+    svg: svg.node(),
+    updateEdges,
+    updateNodes,
+    setFocusVertex,
   };
-}
-
-function updateLinkFilter(
-  link: any,
-  dependencyTypeFilter: Record<DependencyType, boolean>
-) {
-  link.attr("display", (d) => {
-    return dependencyTypeFilter[d.dependencyType as DependencyType]
-      ? "initial"
-      : "none";
-  });
-}
-
-// If highlightNodes is empty, it means everything is highlighted
-function updateNodeHighlight(
-  node: any,
-  link: any,
-  highlightNodes?: VertexId[]
-) {
-  if (highlightNodes) {
-    const set = new Set(highlightNodes);
-    node.attr("display", (d) => {
-      return set.has(d.id) ? "initial" : "none";
-    });
-
-    // Only links that link between highlighted nodes get highlighted
-    link.attr("display", (d) => {
-      return set.has(d.source.id) && set.has(d.target.id) ? "initial" : "none";
-    });
-  } else {
-    node.attr("display", () => "initial");
-    link.attr("display", () => "initial");
-  }
 }
 
 function nodeRadius(d) {
@@ -300,6 +322,7 @@ const GraphView = (props: IProps) => {
   const container = useRef<HTMLDivElement>(null);
 
   const graphComponents = useRef<any>();
+  const computedEdges = useRef<D3Edge[]>();
 
   useEffect(() => {
     if (props.graph && container.current) {
@@ -343,49 +366,20 @@ const GraphView = (props: IProps) => {
       }
 
       const linkTypeTable = categorizedLinks(props.graph);
+      computedEdges.current = edges;
 
       const { width, height } = container.current.getBoundingClientRect();
-      const graph = ForceGraph(
-        { nodes: vertices, links: edges },
-        {
-          nodeId: (d) => d.id,
-          nodeGroup: null,
-          nodeTitle: null,
-          nodeStrength: -50,
-          onClickNode: (_event, d) => {
-            props.onSelectVertex?.(d.id);
-          },
-          onMouseOverNode: (event, d) => {
-            const tooltipEl =
-              document.getElementsByClassName("graph-tooltip")[0];
 
-            if (tooltipEl) {
-              const [title, subtitle] = Array.from(tooltipEl.children);
-              assertElementType(tooltipEl, tooltipEl instanceof HTMLDivElement);
-              assertElementType(title, title instanceof HTMLSpanElement);
-              assertElementType(subtitle, subtitle instanceof HTMLSpanElement);
-
-              tooltipEl.style.left = `${event.clientX - 70}px`;
-              tooltipEl.style.top = `${event.clientY - 80}px`;
-              tooltipEl.style.display = "flex";
-              title.innerText = d.id;
-              subtitle.innerText = `Recompile degree: ${d.recompileEdgeDegree}`;
-            }
-          },
-          onMouseOutNode: () => {
-            const tooltipEl =
-              document.getElementsByClassName("graph-tooltip")[0];
-
-            if (tooltipEl) {
-              assertElementType(tooltipEl, tooltipEl instanceof HTMLDivElement);
-              tooltipEl.style.display = "none";
-            }
-          },
-          nodeRadius,
-          nodeFill: (d) => {
-            if (props.focusedVertex === d.id) return "green";
-            return "currentColor";
-          },
+      if (graphComponents.current) {
+        graphComponents.current.updateNodes(vertices);
+        graphComponents.current.updateEdges(edges);
+      } else {
+        // First time render
+        const graph = renderGraph({
+          vertices,
+          edges,
+          width,
+          height,
           linkStyle: (d) => {
             const linkType = getTableValue(
               linkTypeTable,
@@ -395,7 +389,6 @@ const GraphView = (props: IProps) => {
 
             switch (linkType) {
               case "oneWay":
-                return "line";
               case "twoWaySameType":
                 return "line";
               case "twoWayDifferentType":
@@ -404,56 +397,26 @@ const GraphView = (props: IProps) => {
                 return "line";
             }
           },
-          linkStrokeWidth: 4,
-          linkStrokeOpacity: 1,
-          linkStroke: (d) => COLOR_BY_DEPENDENCY[d.dependencyType],
-          linkDistance: 80,
-          width,
-          height,
-        }
-      );
+        });
 
-      container.current?.appendChild(graph.svg);
-      graphComponents.current = graph;
+        if (graph?.svg) container.current?.appendChild(graph.svg);
+        graphComponents.current = graph;
+      }
     }
   }, [props.graph, container.current]);
 
   useEffect(() => {
-    if (graphComponents.current) {
-      updateLinkFilter(
-        graphComponents.current.link,
-        props.dependencyTypeFilter
+    if (graphComponents.current && computedEdges.current) {
+      const edges = computedEdges.current.filter(
+        (i) => props.dependencyTypeFilter[i.dependencyType]
       );
+      graphComponents.current.updateEdges(edges);
     }
   }, [props.dependencyTypeFilter]);
 
   useEffect(() => {
-    if (graphComponents.current) {
-      if (props.focusedVertex) {
-        graphComponents.current.node
-          .filter((d) => d.id === props.focusedVertex)
-          .each((d) => {
-            graphComponents.current.focusRing
-              .attr("r", nodeRadius(d) + FOCUS_RING_DELTA)
-              .attr("cx", d.x)
-              .attr("cy", d.y)
-              .attr("display", "initital");
-          });
-      } else {
-        graphComponents.current.focusRing.attr("display", "none");
-      }
-    }
+    graphComponents.current?.setFocusVertex(props.focusedVertex);
   }, [props.focusedVertex]);
-
-  useEffect(() => {
-    if (graphComponents.current) {
-      updateNodeHighlight(
-        graphComponents.current.node,
-        graphComponents.current.link,
-        props.highlightVercies
-      );
-    }
-  }, [props.highlightVercies]);
 
   return (
     <div className="graph-view" ref={container}>

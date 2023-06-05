@@ -1,5 +1,11 @@
 import { createRoot } from "react-dom/client";
-import React, { useEffect, useRef, useState, createContext } from "react";
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  createContext,
+  useMemo,
+} from "react";
 
 import SidePanel from "./SidePanel";
 import GraphView from "./GraphView";
@@ -43,7 +49,7 @@ export type Vertex = {
   recompile_dependencies: RecompileDenpendency[];
 };
 
-type Edge = {
+export type Edge = {
   from: VertexId;
   to: VertexId;
   dependency_type: DependencyType;
@@ -145,7 +151,7 @@ function getConnectedVertices(
   graph: Graph,
   vertex: Vertex,
   dependencyTypeFilter: Record<DependencyType, boolean>
-) {
+): Set<VertexId> {
   const dictionary = new Map<VertexId, Vertex>();
   for (const vertex of graph) {
     dictionary.set(vertex.id, vertex);
@@ -169,7 +175,7 @@ function getConnectedVertices(
     return result;
   };
 
-  return Array.from(dfs(vertex.id));
+  return dfs(vertex.id);
 }
 
 export function recompileDenpendencies(vertex: Vertex) {
@@ -206,13 +212,25 @@ const App = () => {
     return api.disconnect;
   }, []);
 
-  console.log("graph", graph);
+  const renderGraph = useMemo(() => {
+    if (graph && selectedVertex) {
+      const filteredVertices = getConnectedVertices(
+        graph,
+        selectedVertex,
+        dependencyTypeFilter
+      );
+
+      return graph.filter((v) => filteredVertices.has(v.id));
+    } else {
+      return graph;
+    }
+  }, [graph, selectedVertex]);
 
   return connected ? (
     <ApiContext.Provider value={api}>
       <GraphView
         loading={isLoading}
-        graph={graph}
+        graph={renderGraph}
         focusedVertex={focusedVertex}
         onSelectVertex={(vertexId) => {
           if (graph) {
@@ -226,11 +244,6 @@ const App = () => {
             setSelectedVertex(vertex);
           }
         }}
-        highlightVercies={
-          graph && selectedVertex
-            ? getConnectedVertices(graph, selectedVertex, dependencyTypeFilter)
-            : undefined
-        }
         onDependencyFiltersChange={(value, type) => {
           const clone = { ...dependencyTypeFilter };
           clone[type] = value;
