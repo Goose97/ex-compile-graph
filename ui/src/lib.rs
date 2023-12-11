@@ -1,10 +1,10 @@
-use std::fmt::Display;
-
-use adapter::ServerAdapter;
 use ratatui::widgets::StatefulWidget;
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
+use std::sync::mpsc;
 
 use crate::app_event::AppEvent;
+use adapter::ServerAdapter;
 
 pub mod adapter;
 pub mod app_event;
@@ -94,9 +94,8 @@ pub trait HandleEvent {
         _event: &AppEvent,
         _widget: &Self::Widget,
         _adapter: &mut impl ServerAdapter,
-    ) -> Vec<AppEvent> {
-        vec![]
-    }
+        _dispatcher: mpsc::Sender<AppEvent>,
+    );
 }
 
 pub trait ProduceEvent {

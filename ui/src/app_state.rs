@@ -1,6 +1,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::StatefulWidget;
+use std::sync::mpsc;
 
 use crate::adapter::ServerAdapter;
 use crate::app_event::AppEvent;
@@ -55,11 +56,16 @@ impl HandleEvent for AppState {
         event: &AppEvent,
         _widget: &Self::Widget,
         _adapter: &mut impl ServerAdapter,
-    ) -> Vec<AppEvent> {
+        _dispatcher: mpsc::Sender<AppEvent>,
+    ) {
         match event {
             AppEvent::SelectFile(file_entry) => {
                 self.global.state_machine = StateMachine::FileDependentsView;
                 self.global.selected_dependency_source = Some(file_entry.clone());
+            }
+
+            AppEvent::GetFilesDone(files) => {
+                self.file_panel.files = files.clone();
             }
 
             AppEvent::Cancel => match self.global.state_machine {
@@ -72,8 +78,6 @@ impl HandleEvent for AppState {
 
             _ => (),
         }
-
-        vec![]
     }
 }
 
@@ -111,8 +115,13 @@ impl ProduceEvent for GlobalState {
 #[cfg(test)]
 mod handle_event_tests {
     use super::*;
-
     use crate::adapter::NoopAdapter;
+    use mpsc::Receiver;
+
+    fn collect_events(rx: Receiver<AppEvent>) -> Vec<AppEvent> {
+        let mut count = 0;
+        rx.try_iter().collect()
+    }
 
     #[test]
     fn select_file() {
@@ -123,8 +132,9 @@ mod handle_event_tests {
             recompile_dependencies: vec![],
         });
 
-        let events = state.handle_event(&event, &NoopWidget {}, &mut NoopAdapter {});
-        assert_eq!(events.len(), 0);
+        let (tx, rx) = mpsc::channel::<AppEvent>();
+        let events = state.handle_event(&event, &NoopWidget {}, &mut NoopAdapter {}, tx);
+        assert_eq!(collect_events(rx).len(), 0);
         assert_eq!(state.global.state_machine, StateMachine::FileDependentsView);
         assert_eq!(
             state.global.selected_dependency_source.unwrap().path,
@@ -143,8 +153,9 @@ mod handle_event_tests {
 
         let event = AppEvent::Cancel;
 
-        let events = state.handle_event(&event, &NoopWidget {}, &mut NoopAdapter {});
-        assert_eq!(events.len(), 0);
+        let (tx, rx) = mpsc::channel::<AppEvent>();
+        let events = state.handle_event(&event, &NoopWidget {}, &mut NoopAdapter {}, tx);
+        assert_eq!(collect_events(rx).len(), 0);
         assert_eq!(state.global.state_machine, StateMachine::FilePanelView);
         assert!(state.global.selected_dependency_source.is_none());
     }

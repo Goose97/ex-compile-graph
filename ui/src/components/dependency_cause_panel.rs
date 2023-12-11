@@ -4,6 +4,7 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, StatefulWidget, Widget};
+use std::sync::mpsc;
 
 use crate::adapter::ServerAdapter;
 use crate::{utils, AppEvent, CodeSnippet, DependencyCause, FilePath, HandleEvent};
@@ -41,41 +42,46 @@ impl HandleEvent for State {
         event: &AppEvent,
         widget: &Self::Widget,
         adapter: &mut impl ServerAdapter,
-    ) -> Vec<AppEvent> {
+        dispatcher: mpsc::Sender<AppEvent>,
+    ) {
         match event {
             AppEvent::SelectDependentFile(recompile_dependency) => {
                 match widget.source_file {
                     Some(ref source) => {
                         // The source and sink is reverse in this case
-                        self.dependency_causes = adapter.get_dependency_causes(
+                        adapter.get_dependency_causes(
                             &recompile_dependency.path,
                             source,
                             &recompile_dependency.reason,
+                            Box::new(move |causes| {
+                                dispatcher
+                                    .send(AppEvent::GetDependencyCausesDone(causes))
+                                    .unwrap();
+                            }),
                         );
                     }
 
                     None => unreachable!(),
                 };
+            }
 
-                vec![]
+            AppEvent::GetDependencyCausesDone(causes) => {
+                self.dependency_causes = causes.clone();
             }
 
             AppEvent::ViewDependentFile(dependency_link) => {
                 self.viewing_recompile_dependency_file = Some(dependency_link.sink.clone());
-                vec![]
             }
 
             AppEvent::StopViewDependentFile(_) => {
                 self.viewing_recompile_dependency_file = None;
-                vec![]
             }
 
             AppEvent::Cancel => {
                 *self = Self::new();
-                vec![]
             }
 
-            _ => vec![],
+            _ => (),
         }
     }
 }
@@ -100,29 +106,33 @@ fn render_bounding_box(area: Rect, buf: &mut Buffer) {
 
 fn render_cause_snippets(area: Rect, buf: &mut Buffer, state: &mut State) {
     if let Some(ref viewing_file) = state.viewing_recompile_dependency_file {
-        let dependency_cause = state
+        match state
             .dependency_causes
             .iter()
             .find(|cause| cause.sink == *viewing_file)
-            .unwrap();
+        {
+            Some(cause) if cause.snippets.len() == 0 => {
+                let lines = vec![Line::styled(
+                    "No snippets",
+                    Style::default().add_modifier(Modifier::BOLD),
+                )];
+                let paragraph = Paragraph::new(lines).style(Style::default().fg(Color::White));
+                paragraph.render(utils::padding(&area, 2, 2), buf);
+            }
 
-        if dependency_cause.snippets.len() == 0 {
-            let lines = vec![Line::styled(
-                "No snippets",
-                Style::default().add_modifier(Modifier::BOLD),
-            )];
-            let paragraph = Paragraph::new(lines).style(Style::default().fg(Color::White));
-            paragraph.render(utils::padding(&area, 2, 2), buf);
-        } else {
-            let lines: Vec<Line> = dependency_cause
-                .snippets
-                .iter()
-                .flat_map(|snippet| code_snippet_text(dependency_cause.source.clone(), snippet))
-                .collect();
+            Some(cause) if cause.snippets.len() > 0 => {
+                let lines: Vec<Line> = cause
+                    .snippets
+                    .iter()
+                    .flat_map(|snippet| code_snippet_text(cause.source.clone(), snippet))
+                    .collect();
 
-            Paragraph::new(lines)
-                .style(Style::default().fg(Color::White))
-                .render(utils::padding(&area, 2, 2), buf);
+                Paragraph::new(lines)
+                    .style(Style::default().fg(Color::White))
+                    .render(utils::padding(&area, 2, 2), buf);
+            }
+
+            _ => (),
         }
     }
 }
@@ -178,9 +188,10 @@ fn code_snippet_text(source_file: FilePath, snippet: &CodeSnippet) -> Vec<Line> 
 mod handle_event_tests {
     use super::*;
     use crate::{
-        adapter::NoopAdapter, DependencyLink, DependencyType, RecomplileDependency,
+        adapter::NoopAdapter, DependencyLink, DependencyType, FileEntry, RecomplileDependency,
         RecomplileDependencyReason,
     };
+    use mpsc::Receiver;
 
     fn widget() -> DependencyCausePanel {
         DependencyCausePanel::new(Some(String::from("source")))
@@ -196,7 +207,7 @@ mod handle_event_tests {
                 unreachable!()
             }
 
-            fn get_files(&mut self) -> Vec<crate::FileEntry> {
+            fn get_files(&mut self, callback: Box<dyn FnOnce(Vec<FileEntry>) -> ()>) {
                 unreachable!()
             }
 
@@ -205,17 +216,22 @@ mod handle_event_tests {
                 _source: &FilePath,
                 _sink: &FilePath,
                 _reason: &crate::RecomplileDependencyReason,
-            ) -> Vec<DependencyCause> {
-                vec![DependencyCause {
+                callback: Box<dyn FnOnce(Vec<DependencyCause>)>,
+            ) {
+                callback(vec![DependencyCause {
                     source: String::from("source"),
                     sink: String::from("sink"),
                     dependency_type: DependencyType::Compile,
                     snippets: self.snippets.clone(),
-                }]
+                }])
             }
         }
 
         MockAdapter { snippets }
+    }
+
+    fn collect_events(rx: Receiver<AppEvent>) -> Vec<AppEvent> {
+        rx.try_iter().collect()
     }
 
     #[test]
@@ -235,10 +251,20 @@ mod handle_event_tests {
             reason: RecomplileDependencyReason::Compile,
             dependency_chain: vec![],
         });
-        let events = state.handle_event(&event, &widget(), &mut adapter);
+        let (tx, rx) = mpsc::channel::<AppEvent>();
+        state.handle_event(&event, &widget(), &mut adapter, tx.clone());
 
+        let events = collect_events(rx);
+        assert_eq!(events.len(), 1);
+
+        if let AppEvent::GetDependencyCausesDone(causes) = &events[0] {
+            assert_eq!(causes[0].snippets, snippets);
+        } else {
+            panic!("Expected GetDependencyCausesDone event");
+        }
+
+        state.handle_event(&events[0], &widget(), &mut adapter, tx);
         assert_eq!(state.dependency_causes[0].snippets, snippets);
-        assert_eq!(events.len(), 0);
     }
 
     #[test]
@@ -250,13 +276,14 @@ mod handle_event_tests {
             sink: String::from("sink"),
             dependency_type: DependencyType::Compile,
         });
-        let events = state.handle_event(&event, &widget(), &mut NoopAdapter::new());
+        let (tx, rx) = mpsc::channel::<AppEvent>();
+        state.handle_event(&event, &widget(), &mut NoopAdapter::new(), tx);
 
         assert_eq!(
             state.viewing_recompile_dependency_file,
-            Some(String::from("source"))
+            Some(String::from("sink"))
         );
-        assert_eq!(events.len(), 0);
+        assert_eq!(collect_events(rx).len(), 0);
     }
 
     #[test]
@@ -269,8 +296,9 @@ mod handle_event_tests {
             snippets: vec![],
         }];
 
-        let events = state.handle_event(&AppEvent::Cancel, &widget(), &mut NoopAdapter::new());
+        let (tx, rx) = mpsc::channel::<AppEvent>();
+        state.handle_event(&AppEvent::Cancel, &widget(), &mut NoopAdapter::new(), tx);
         assert_eq!(state.dependency_causes.len(), 0);
-        assert_eq!(events.len(), 0);
+        assert_eq!(collect_events(rx).len(), 0);
     }
 }

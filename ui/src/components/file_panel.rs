@@ -3,6 +3,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, StatefulWidget, Widget};
+use std::sync::mpsc;
 
 use crate::adapter::ServerAdapter;
 use crate::app_event::AppEvent;
@@ -40,9 +41,10 @@ impl HandleEvent for State {
         event: &AppEvent,
         _widget: &Self::Widget,
         _adapter: &mut impl ServerAdapter,
-    ) -> Vec<AppEvent> {
+        _dispatcher: mpsc::Sender<AppEvent>,
+    ) {
         if self.files.is_empty() {
-            return vec![];
+            return;
         }
 
         match event {
@@ -60,8 +62,6 @@ impl HandleEvent for State {
 
             _ => (),
         }
-
-        vec![]
     }
 }
 
@@ -159,10 +159,12 @@ mod handle_event_tests {
         state.files = file_entries(&["one", "two", "three"]);
         state.selected_file_index = 1;
 
+        let (tx, _) = mpsc::channel::<AppEvent>();
         state.handle_event(
             &AppEvent::UpButtonPressed,
             &FilePanel::new(),
             &mut noop_adapter(),
+            tx,
         );
         assert_eq!(state.selected_file_index, 0);
     }
@@ -173,10 +175,12 @@ mod handle_event_tests {
         state.files = file_entries(&["one", "two", "three"]);
         state.selected_file_index = 0;
 
+        let (tx, _) = mpsc::channel::<AppEvent>();
         state.handle_event(
             &AppEvent::UpButtonPressed,
             &FilePanel::new(),
             &mut noop_adapter(),
+            tx,
         );
         assert_eq!(state.selected_file_index, 0);
     }
@@ -187,10 +191,12 @@ mod handle_event_tests {
         state.files = file_entries(&["one", "two", "three"]);
         state.selected_file_index = 1;
 
+        let (tx, _) = mpsc::channel::<AppEvent>();
         state.handle_event(
             &AppEvent::DownButtonPressed,
             &FilePanel::new(),
             &mut noop_adapter(),
+            tx,
         );
         assert_eq!(state.selected_file_index, 2);
     }
@@ -201,10 +207,12 @@ mod handle_event_tests {
         state.files = file_entries(&["one", "two", "three"]);
         state.selected_file_index = 2;
 
+        let (tx, _) = mpsc::channel::<AppEvent>();
         state.handle_event(
             &AppEvent::DownButtonPressed,
             &FilePanel::new(),
             &mut noop_adapter(),
+            tx,
         );
         assert_eq!(state.selected_file_index, 2);
     }

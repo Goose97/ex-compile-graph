@@ -3,6 +3,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, StatefulWidget, Widget};
+use std::sync::mpsc;
 
 use crate::adapter::ServerAdapter;
 use crate::utils;
@@ -49,30 +50,32 @@ impl HandleEvent for State {
         event: &AppEvent,
         widget: &Self::Widget,
         _adapter: &mut impl ServerAdapter,
-    ) -> Vec<AppEvent> {
+        mut dispatcher: mpsc::Sender<AppEvent>,
+    ) {
         match event {
-            AppEvent::DownButtonPressed => handle_down_button_pressed(self, widget),
-            AppEvent::UpButtonPressed => handle_up_button_pressed(self, widget),
-
-            AppEvent::SelectDependentFile(file) => {
-                match self.expanded_file {
-                    Some(ref expanded) if expanded == &file.id => self.expanded_file = None,
-                    _ => self.expanded_file = Some(file.id.clone()),
-                }
-
-                vec![]
+            AppEvent::DownButtonPressed => {
+                handle_down_button_pressed(self, widget, &mut dispatcher)
             }
+            AppEvent::UpButtonPressed => handle_up_button_pressed(self, widget, &mut dispatcher),
+
+            AppEvent::SelectDependentFile(file) => match self.expanded_file {
+                Some(ref expanded) if expanded == &file.id => self.expanded_file = None,
+                _ => self.expanded_file = Some(file.id.clone()),
+            },
 
             AppEvent::Cancel => {
                 *self = Self::new();
-                vec![]
             }
-            _ => vec![],
+            _ => (),
         }
     }
 }
 
-fn handle_down_button_pressed(state: &mut State, widget: &FileDependentPanel) -> Vec<AppEvent> {
+fn handle_down_button_pressed(
+    state: &mut State,
+    widget: &FileDependentPanel,
+    dispatcher: &mut mpsc::Sender<AppEvent>,
+) {
     enum Action {
         NextOuterList,
         NextExpandedList,
@@ -110,8 +113,6 @@ fn handle_down_button_pressed(state: &mut State, widget: &FileDependentPanel) ->
         None => &[Action::NextOuterList],
     };
 
-    let mut events = vec![];
-
     for action in actions {
         match action {
             Action::NextOuterList => {
@@ -122,32 +123,40 @@ fn handle_down_button_pressed(state: &mut State, widget: &FileDependentPanel) ->
 
             Action::NextExpandedList => match state.selected_file_index.1 {
                 Some(index) => {
-                    events.push(stop_view_file_event(state, index, widget));
-                    events.push(view_file_event(state, index + 1, widget));
+                    dispatcher
+                        .send(stop_view_file_event(state, index, widget))
+                        .unwrap();
+                    dispatcher
+                        .send(view_file_event(state, index + 1, widget))
+                        .unwrap();
                     state.selected_file_index.1 = Some(index + 1);
                 }
 
                 None => {
-                    events.push(view_file_event(state, 0, widget));
+                    dispatcher.send(view_file_event(state, 0, widget)).unwrap();
                     state.selected_file_index.1 = Some(0);
                 }
             },
 
             Action::ExitExpandedList => {
-                events.push(stop_view_file_event(
-                    state,
-                    state.selected_file_index.1.unwrap(),
-                    widget,
-                ));
+                dispatcher
+                    .send(stop_view_file_event(
+                        state,
+                        state.selected_file_index.1.unwrap(),
+                        widget,
+                    ))
+                    .unwrap();
                 state.selected_file_index.1 = None;
             }
         }
     }
-
-    events
 }
 
-fn handle_up_button_pressed(state: &mut State, widget: &FileDependentPanel) -> Vec<AppEvent> {
+fn handle_up_button_pressed(
+    state: &mut State,
+    widget: &FileDependentPanel,
+    dispatcher: &mut mpsc::Sender<AppEvent>,
+) {
     enum Action {
         PrevOuterList,
         PrevExpandedList,
@@ -172,8 +181,6 @@ fn handle_up_button_pressed(state: &mut State, widget: &FileDependentPanel) -> V
         None => Action::PrevOuterList,
     };
 
-    let mut events: Vec<AppEvent> = vec![];
-
     match action {
         Action::PrevOuterList => {
             if state.selected_file_index.0 > 0 {
@@ -187,11 +194,13 @@ fn handle_up_button_pressed(state: &mut State, widget: &FileDependentPanel) -> V
                         state.selected_file_index.1 =
                             Some(selected_file.dependency_chain.len() - 1);
 
-                        events.push(view_file_event(
-                            state,
-                            selected_file.dependency_chain.len() - 1,
-                            widget,
-                        ));
+                        dispatcher
+                            .send(view_file_event(
+                                state,
+                                selected_file.dependency_chain.len() - 1,
+                                widget,
+                            ))
+                            .unwrap();
                     }
                 }
             }
@@ -200,23 +209,27 @@ fn handle_up_button_pressed(state: &mut State, widget: &FileDependentPanel) -> V
         Action::PrevExpandedList => match state.selected_file_index.1 {
             Some(index) if index > 0 => {
                 state.selected_file_index.1 = Some(index - 1);
-                events.push(stop_view_file_event(state, index, widget));
-                events.push(view_file_event(state, index - 1, widget));
+                dispatcher
+                    .send(stop_view_file_event(state, index, widget))
+                    .unwrap();
+                dispatcher
+                    .send(view_file_event(state, index - 1, widget))
+                    .unwrap();
             }
             _ => (),
         },
 
         Action::ExitExpandedList => {
-            events.push(stop_view_file_event(
-                state,
-                state.selected_file_index.1.unwrap(),
-                widget,
-            ));
+            dispatcher
+                .send(stop_view_file_event(
+                    state,
+                    state.selected_file_index.1.unwrap(),
+                    widget,
+                ))
+                .unwrap();
             state.selected_file_index.1 = None;
         }
     }
-
-    events
 }
 
 fn view_file_event(
@@ -390,6 +403,7 @@ fn fill_line_width(line: &mut Line, width: u16) {
 mod handle_event_tests {
     use crate::adapter::NoopAdapter;
     use crate::RecomplileDependencyReason;
+    use mpsc::Receiver;
 
     use super::*;
 
@@ -436,6 +450,11 @@ mod handle_event_tests {
         ]
     }
 
+    fn collect_events(rx: Receiver<AppEvent>) -> Vec<AppEvent> {
+        let mut count = 0;
+        rx.try_iter().collect()
+    }
+
     mod up_button {
         use super::*;
 
@@ -444,10 +463,16 @@ mod handle_event_tests {
             let mut state = State::new();
             state.selected_file_index = (1, None);
 
-            let events =
-                state.handle_event(&AppEvent::UpButtonPressed, &widget(), &mut noop_adapter());
+            let (tx, rx) = mpsc::channel::<AppEvent>();
+
+            state.handle_event(
+                &AppEvent::UpButtonPressed,
+                &widget(),
+                &mut noop_adapter(),
+                tx,
+            );
             assert_eq!(state.selected_file_index, (0, None));
-            assert_eq!(events.len(), 0);
+            assert_eq!(collect_events(rx).len(), 0);
         }
 
         #[test]
@@ -460,9 +485,11 @@ mod handle_event_tests {
             state.expanded_file = Some(String::from("two"));
             state.selected_file_index = (1, Some(1));
 
-            let events =
-                state.handle_event(&AppEvent::UpButtonPressed, &widget, &mut noop_adapter());
+            let (tx, rx) = mpsc::channel::<AppEvent>();
+            state.handle_event(&AppEvent::UpButtonPressed, &widget, &mut noop_adapter(), tx);
             assert_eq!(state.selected_file_index, (1, Some(0)));
+
+            let events = collect_events(rx);
             assert_eq!(events.len(), 2);
             if let AppEvent::ViewDependentFile(ref dependency_link) = events[0] {
                 assert_eq!(dependency_link.sink, "two.one");
@@ -483,9 +510,10 @@ mod handle_event_tests {
             state.expanded_file = Some(String::from("two"));
             state.selected_file_index = (1, Some(0));
 
-            let events =
-                state.handle_event(&AppEvent::UpButtonPressed, &widget, &mut noop_adapter());
+            let (tx, rx) = mpsc::channel::<AppEvent>();
+            state.handle_event(&AppEvent::UpButtonPressed, &widget, &mut noop_adapter(), tx);
             assert_eq!(state.selected_file_index, (1, None));
+            let events = collect_events(rx);
             assert_eq!(events.len(), 1);
             if let AppEvent::StopViewDependentFile(ref dependency_link) = events[0] {
                 assert_eq!(dependency_link.sink, "two.one");
@@ -502,9 +530,10 @@ mod handle_event_tests {
             state.expanded_file = Some(String::from("two"));
             state.selected_file_index = (2, None);
 
-            let events =
-                state.handle_event(&AppEvent::UpButtonPressed, &widget, &mut noop_adapter());
+            let (tx, rx) = mpsc::channel::<AppEvent>();
+            state.handle_event(&AppEvent::UpButtonPressed, &widget, &mut noop_adapter(), tx);
             assert_eq!(state.selected_file_index, (1, Some(2)));
+            let events = collect_events(rx);
             assert_eq!(events.len(), 1);
             if let AppEvent::ViewDependentFile(ref dependency_link) = events[0] {
                 assert_eq!(dependency_link.sink, "two.three");
@@ -516,10 +545,15 @@ mod handle_event_tests {
             let mut state = State::new();
             state.selected_file_index = (0, None);
 
-            let events =
-                state.handle_event(&AppEvent::UpButtonPressed, &widget(), &mut noop_adapter());
+            let (tx, rx) = mpsc::channel::<AppEvent>();
+            state.handle_event(
+                &AppEvent::UpButtonPressed,
+                &widget(),
+                &mut noop_adapter(),
+                tx,
+            );
             assert_eq!(state.selected_file_index, (0, None));
-            assert_eq!(events.len(), 0);
+            assert_eq!(collect_events(rx).len(), 0);
         }
     }
 
@@ -531,10 +565,15 @@ mod handle_event_tests {
             let mut state = State::new();
             state.selected_file_index = (1, None);
 
-            let events =
-                state.handle_event(&AppEvent::DownButtonPressed, &widget(), &mut noop_adapter());
+            let (tx, rx) = mpsc::channel::<AppEvent>();
+            state.handle_event(
+                &AppEvent::DownButtonPressed,
+                &widget(),
+                &mut noop_adapter(),
+                tx,
+            );
             assert_eq!(state.selected_file_index, (2, None));
-            assert_eq!(events.len(), 0);
+            assert_eq!(collect_events(rx).len(), 0);
         }
 
         #[test]
@@ -542,10 +581,15 @@ mod handle_event_tests {
             let mut state = State::new();
             state.selected_file_index = (2, None);
 
-            let events =
-                state.handle_event(&AppEvent::DownButtonPressed, &widget(), &mut noop_adapter());
+            let (tx, rx) = mpsc::channel::<AppEvent>();
+            state.handle_event(
+                &AppEvent::DownButtonPressed,
+                &widget(),
+                &mut noop_adapter(),
+                tx,
+            );
             assert_eq!(state.selected_file_index, (2, None));
-            assert_eq!(events.len(), 0);
+            assert_eq!(collect_events(rx).len(), 0);
         }
 
         #[test]
@@ -558,9 +602,16 @@ mod handle_event_tests {
             state.expanded_file = Some(String::from("two"));
             state.selected_file_index = (1, Some(1));
 
-            let events =
-                state.handle_event(&AppEvent::DownButtonPressed, &widget, &mut noop_adapter());
+            let (tx, rx) = mpsc::channel::<AppEvent>();
+            state.handle_event(
+                &AppEvent::DownButtonPressed,
+                &widget,
+                &mut noop_adapter(),
+                tx,
+            );
             assert_eq!(state.selected_file_index, (1, Some(2)));
+
+            let events = collect_events(rx);
             assert_eq!(events.len(), 2);
 
             if let AppEvent::ViewDependentFile(ref dependency_link) = events[0] {
@@ -582,9 +633,16 @@ mod handle_event_tests {
             state.expanded_file = Some(String::from("two"));
             state.selected_file_index = (1, Some(2));
 
-            let events =
-                state.handle_event(&AppEvent::DownButtonPressed, &widget, &mut noop_adapter());
+            let (tx, rx) = mpsc::channel::<AppEvent>();
+            state.handle_event(
+                &AppEvent::DownButtonPressed,
+                &widget,
+                &mut noop_adapter(),
+                tx,
+            );
             assert_eq!(state.selected_file_index, (2, None));
+
+            let events = collect_events(rx);
             assert_eq!(events.len(), 1);
 
             if let AppEvent::StopViewDependentFile(ref dependency_link) = events[0] {
@@ -602,9 +660,16 @@ mod handle_event_tests {
             state.expanded_file = Some(String::from("two"));
             state.selected_file_index = (1, None);
 
-            let events =
-                state.handle_event(&AppEvent::DownButtonPressed, &widget, &mut noop_adapter());
+            let (tx, rx) = mpsc::channel::<AppEvent>();
+            state.handle_event(
+                &AppEvent::DownButtonPressed,
+                &widget,
+                &mut noop_adapter(),
+                tx,
+            );
             assert_eq!(state.selected_file_index, (1, Some(0)));
+
+            let events = collect_events(rx);
             assert_eq!(events.len(), 1);
 
             if let AppEvent::ViewDependentFile(ref dependency_link) = events[0] {
@@ -624,7 +689,8 @@ mod handle_event_tests {
 
             let mut state = State::new();
             let event = AppEvent::SelectDependentFile(recompile_dependencies[0].clone());
-            state.handle_event(&event, &widget, &mut noop_adapter());
+            let (tx, _) = mpsc::channel::<AppEvent>();
+            state.handle_event(&event, &widget, &mut noop_adapter(), tx);
             assert_eq!(state.expanded_file, Some(String::from("one")));
         }
 
@@ -637,8 +703,9 @@ mod handle_event_tests {
             let mut state = State::new();
             state.expanded_file = Some(String::from("two"));
 
+            let (tx, _) = mpsc::channel::<AppEvent>();
             let event = AppEvent::SelectDependentFile(recompile_dependencies[0].clone());
-            state.handle_event(&event, &widget, &mut noop_adapter());
+            state.handle_event(&event, &widget, &mut noop_adapter(), tx);
             assert_eq!(state.expanded_file, Some(String::from("one")));
         }
 
@@ -651,8 +718,9 @@ mod handle_event_tests {
             let mut state = State::new();
             state.expanded_file = Some(String::from("two"));
 
+            let (tx, _) = mpsc::channel::<AppEvent>();
             let event = AppEvent::SelectDependentFile(recompile_dependencies[1].clone());
-            state.handle_event(&event, &widget, &mut noop_adapter());
+            state.handle_event(&event, &widget, &mut noop_adapter(), tx);
             assert_eq!(state.expanded_file, None);
         }
 
@@ -664,7 +732,8 @@ mod handle_event_tests {
             let mut state = State::new();
             state.selected_file_index = (2, None);
 
-            state.handle_event(&AppEvent::Cancel, &widget, &mut noop_adapter());
+            let (tx, _) = mpsc::channel::<AppEvent>();
+            state.handle_event(&AppEvent::Cancel, &widget, &mut noop_adapter(), tx);
             assert_eq!(state.expanded_file, None);
             assert_eq!(state.selected_file_index, (0, None));
             assert_eq!(state.selected_file_index, (0, None));

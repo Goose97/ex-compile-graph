@@ -5,6 +5,7 @@ use ratatui::terminal::Terminal;
 use ratatui::Frame;
 use std::io::Stderr;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use ui::components::dependency_cause_panel::DependencyCausePanel;
 
 use ui::adapter::{Adapter, ServerAdapter};
@@ -28,10 +29,10 @@ fn main() {
         .current_dir("..")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .expect("mix command failed to start");
 
-    // TODO: handle server crash
     let mut adapter = Adapter::new(child_proc);
     adapter.init_server();
 
@@ -45,9 +46,13 @@ fn render(mut adapter: Adapter) -> Result<()> {
 
     let mut terminal = Terminal::new(CrosstermBackend::new(std::io::stderr()))?;
     let mut app_state = AppState::new();
+    let mut exit_output = String::new();
+    let (tx, rx) = std::sync::mpsc::channel::<AppEvent>();
 
-    let response = adapter.get_files();
-    app_state.file_panel.files = response;
+    let tx_clone = tx.clone();
+    adapter.get_files(Box::new(move |files| {
+        tx_clone.send(AppEvent::GetFilesDone(files)).unwrap();
+    }));
 
     // Main application loop
     'main_loop: loop {
@@ -82,17 +87,38 @@ fn render(mut adapter: Adapter) -> Result<()> {
             );
         })?;
 
-        for event in poll_terminal_event(&mut app_state, &widget_board)? {
+        adapter.poll_responses();
+
+        let terminal_events = poll_terminal_event(&mut app_state, &widget_board)?;
+        let dispatcher_events = rx.try_iter();
+
+        for event in terminal_events.into_iter().chain(dispatcher_events) {
             match event {
                 AppEvent::Quit => break 'main_loop,
-                event => dispatch_event(&mut app_state, &event, &widget_board, &mut adapter),
+                event => dispatch_event(
+                    &mut app_state,
+                    &event,
+                    &widget_board,
+                    &mut adapter,
+                    tx.clone(),
+                ),
             }
+        }
+
+        match adapter.check_server_status() {
+            Some(output) => {
+                exit_output = output;
+                break 'main_loop;
+            }
+
+            None => (),
         }
     }
 
     // shutdown down: reset terminal back to original state
     crossterm::execute!(std::io::stderr(), crossterm::terminal::LeaveAlternateScreen)?;
     crossterm::terminal::disable_raw_mode()?;
+    println!("{}", exit_output);
 
     Ok(())
 }
@@ -176,46 +202,36 @@ fn dispatch_event(
     event: &AppEvent,
     widget_board: &WidgetBoard,
     adapter: &mut Adapter,
+    dispatcher: mpsc::Sender<AppEvent>,
 ) {
-    let events_a = match app_state.global.state_machine {
-        StateMachine::FilePanelView => {
-            app_state
-                .file_panel
-                .handle_event(event, &widget_board.file_panel, adapter)
-        }
+    match app_state.global.state_machine {
+        StateMachine::FilePanelView => app_state.file_panel.handle_event(
+            event,
+            &widget_board.file_panel,
+            adapter,
+            dispatcher.clone(),
+        ),
         StateMachine::FileDependentsView => {
             app_state.file_dependent_panel.handle_event(
                 event,
                 // It is guarantee that the widget exists if the app is in this state
                 &widget_board.file_dependent_panel.clone().unwrap(),
                 adapter,
+                dispatcher.clone(),
             )
         }
     };
 
-    let events_b = app_state.dependency_cause_panel.handle_event(
+    app_state.dependency_cause_panel.handle_event(
         &event,
         &widget_board.dependency_cause_panel,
         adapter,
+        dispatcher.clone(),
     );
 
     // AppState is a special case since it doesn't have a concrete widget associated with it
     // We create a dummy widget to solve that
-    let events_c = app_state.handle_event(&event, &NoopWidget {}, adapter);
-
-    // TODO: In theory, this could result in a infinite loop
-    // We should have a safety net to avoid that
-    for event in events_a.iter() {
-        dispatch_event(app_state, event, widget_board, adapter);
-    }
-
-    for event in events_b.iter() {
-        dispatch_event(app_state, event, widget_board, adapter);
-    }
-
-    for event in events_c.iter() {
-        dispatch_event(app_state, event, widget_board, adapter);
-    }
+    app_state.handle_event(&event, &NoopWidget {}, adapter, dispatcher);
 }
 
 // use std::fs::OpenOptions;
