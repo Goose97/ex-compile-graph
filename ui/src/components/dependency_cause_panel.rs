@@ -106,34 +106,30 @@ fn render_bounding_box(area: Rect, buf: &mut Buffer) {
 
 fn render_cause_snippets(area: Rect, buf: &mut Buffer, state: &mut State) {
     if let Some(ref viewing_file) = state.viewing_recompile_dependency_file {
-        match state
+        let lines = match state
             .dependency_causes
             .iter()
             .find(|cause| cause.sink == *viewing_file)
         {
             Some(cause) if cause.snippets.len() == 0 => {
-                let lines = vec![Line::styled(
+                vec![Line::styled(
                     "No snippets",
                     Style::default().add_modifier(Modifier::BOLD),
-                )];
-                let paragraph = Paragraph::new(lines).style(Style::default().fg(Color::White));
-                paragraph.render(utils::padding(&area, 2, 2), buf);
+                )]
             }
 
-            Some(cause) if cause.snippets.len() > 0 => {
-                let lines: Vec<Line> = cause
-                    .snippets
-                    .iter()
-                    .flat_map(|snippet| code_snippet_text(cause.source.clone(), snippet))
-                    .collect();
+            Some(cause) if cause.snippets.len() > 0 => cause
+                .snippets
+                .iter()
+                .flat_map(|snippet| code_snippet_text(cause.source.clone(), snippet))
+                .collect(),
 
-                Paragraph::new(lines)
-                    .style(Style::default().fg(Color::White))
-                    .render(utils::padding(&area, 2, 2), buf);
-            }
+            _ => vec![],
+        };
 
-            _ => (),
-        }
+        Paragraph::new(lines)
+            .style(Style::default().fg(Color::White))
+            .render(utils::padding(&area, 2, 2), buf);
     }
 }
 
@@ -207,7 +203,7 @@ mod handle_event_tests {
                 unreachable!()
             }
 
-            fn get_files(&mut self, callback: Box<dyn FnOnce(Vec<FileEntry>) -> ()>) {
+            fn get_files(&mut self, _callback: Box<dyn FnOnce(Vec<FileEntry>) -> ()>) {
                 unreachable!()
             }
 
