@@ -233,13 +233,3 @@ fn dispatch_event(
     // We create a dummy widget to solve that
     app_state.handle_event(&event, &NoopWidget {}, adapter, dispatcher);
 }
-
-// use std::fs::OpenOptions;
-// use std::io::Write;
-// let mut file = OpenOptions::new()
-//     .append(true)
-//     .create(true)
-//     .open("debug.log")
-//     .unwrap();
-// file.write(format!("Dispatching event {:?}\n", event).as_bytes())
-//     .unwrap();

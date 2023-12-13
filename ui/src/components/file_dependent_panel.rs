@@ -451,7 +451,6 @@ mod handle_event_tests {
     }
 
     fn collect_events(rx: Receiver<AppEvent>) -> Vec<AppEvent> {
-        let mut count = 0;
         rx.try_iter().collect()
     }
 
