@@ -65,7 +65,7 @@ impl HandleEvent for AppState {
             }
 
             AppEvent::GetFilesDone(files) => {
-                self.file_panel.files = files.clone();
+                self.file_panel.files = Some(files.clone());
             }
 
             AppEvent::Cancel => match self.global.state_machine {
