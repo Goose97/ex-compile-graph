@@ -14,6 +14,7 @@ use ui::app_state::StateMachine;
 use ui::app_state::{AppState, NoopWidget};
 use ui::components::file_dependent_panel::FileDependentPanel;
 use ui::components::file_panel::FilePanel;
+use ui::FRAME_COUNT;
 use ui::{HandleEvent, ProduceEvent};
 
 #[derive(Clone)]
@@ -56,6 +57,10 @@ fn render(mut adapter: Adapter) -> Result<()> {
 
     // Main application loop
     'main_loop: loop {
+        unsafe {
+            FRAME_COUNT += 1;
+        }
+
         let widget_board: WidgetBoard = WidgetBoard {
             file_panel: FilePanel::new(),
             file_dependent_panel: app_state

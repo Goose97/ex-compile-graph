@@ -12,6 +12,8 @@ pub mod app_state;
 pub mod components;
 pub mod utils;
 
+pub static mut FRAME_COUNT: usize = 0;
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum RecomplileDependencyReason {
     #[serde(rename = "compile")]
