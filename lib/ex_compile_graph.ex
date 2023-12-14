@@ -1,6 +1,6 @@
 defmodule ExCompileGraph do
   @moduledoc """
-  Module contains API to handle Web UI interactions
+  API to interact with the dependency graph
   """
 
   @type manifest_path :: binary()

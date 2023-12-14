@@ -63,21 +63,13 @@ defmodule ExCompileGraph.Server do
 
       %{path: vertex_id, recompile_dependencies: recompile_dependencies}
     end
-    # TODO: remove this
-    |> Enum.filter(&String.contains?(&1.path, "fixtures"))
   end
 
   def dispatch({:get_dependency_causes, params}) do
-    File.write!("ui/debug.log", "Requesting #{inspect(params)}\n")
-
-    result =
-      ExCompileGraph.get_recompile_dependency_causes(
-        params["source"],
-        params["sink"],
-        String.to_existing_atom(params["reason"])
-      )
-
-    File.write!("ui/debug.log", "Response #{inspect(result)}\n")
-    result
+    ExCompileGraph.get_recompile_dependency_causes(
+      params["source"],
+      params["sink"],
+      String.to_existing_atom(params["reason"])
+    )
   end
 end
