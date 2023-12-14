@@ -50,26 +50,45 @@ defmodule ExCompileGraph.TestUtils do
     if exit_code == 0, do: :ok, else: {:error, receive_stream_response(ref)}
   end
 
+  def add_load_path() do
+    case run_mix_shell(~s/mix run -e "Mix.Project.compile_path() |> Mix.Shell.IO.info()"/) do
+      {:ok, output} ->
+        :code.add_path(String.to_charlist(output))
+        :ok
+
+      {:error, output} ->
+        {:error, output}
+    end
+  end
+
   def fixtures_manifest() do
+    case run_mix_shell(~s/mix run -e "Mix.Project.manifest_path() |> Mix.Shell.IO.info()"/) do
+      {:ok, output} ->
+        {:ok, Path.join([output, @manifest])}
+
+      {:error, output} ->
+        {:error, output}
+    end
+  end
+
+  defp run_mix_shell(command) do
     ref = make_ref()
 
     exit_code =
       Mix.Shell.cmd(
-        ~s/mix run -e "Mix.Project.manifest_path() |> Mix.Shell.IO.info()"/,
+        command,
         [cd: fixtures_path()],
         fn output -> send(self(), {ref, output}) end
       )
 
     receive do
       {^ref, output} ->
-        if exit_code == 0,
-          do: {:ok, Path.join([String.trim(output), @manifest])},
-          else: {:error, output}
+        output = String.trim(output)
+        if exit_code == 0, do: {:ok, output}, else: {:error, output}
     after
       0 ->
         raise RuntimeError,
-          message:
-            "#{__MODULE__}.fixtures_manifest: expect to receive a message, instead got none"
+          message: "#{__MODULE__}.run_mix_shell: expect to receive a message, instead got none"
     end
   end
 

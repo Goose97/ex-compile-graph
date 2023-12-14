@@ -616,6 +616,7 @@ defmodule ExCompileGraph.DependencyTest do
     end)
 
     :ok = TestUtils.compile_fixtures()
+    :ok = TestUtils.add_load_path()
 
     {:ok, manifest_path} = TestUtils.fixtures_manifest()
     graph = Graph.build(manifest_path)
