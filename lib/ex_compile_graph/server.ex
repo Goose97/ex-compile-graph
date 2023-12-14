@@ -63,6 +63,7 @@ defmodule ExCompileGraph.Server do
 
       %{path: vertex_id, recompile_dependencies: recompile_dependencies}
     end
+    |> Enum.sort_by(& length(&1.recompile_dependencies), :desc)
   end
 
   def dispatch({:get_dependency_causes, params}) do
