@@ -14,6 +14,7 @@ use ui::app_state::StateMachine;
 use ui::app_state::{AppState, NoopWidget};
 use ui::components::file_dependent_panel::FileDependentPanel;
 use ui::components::file_panel::FilePanel;
+use ui::components::instructions::Instructions;
 use ui::FRAME_COUNT;
 use ui::{HandleEvent, ProduceEvent};
 
@@ -81,7 +82,7 @@ fn render(mut adapter: Adapter) -> Result<()> {
             let widget_board = widget_board.clone();
             let frame_rect = f.size();
 
-            let [left_rect, right_rect] = calculate_layout(frame_rect);
+            let [left_rect, right_rect, bottom_rect] = calculate_layout(frame_rect);
 
             render_left_panel(f, &widget_board, &mut app_state, left_rect);
 
@@ -90,6 +91,8 @@ fn render(mut adapter: Adapter) -> Result<()> {
                 right_rect,
                 &mut app_state.dependency_cause_panel,
             );
+
+            f.render_widget(Instructions::new(), bottom_rect)
         })?;
 
         adapter.poll_responses();
@@ -128,13 +131,18 @@ fn render(mut adapter: Adapter) -> Result<()> {
     Ok(())
 }
 
-fn calculate_layout(root_rect: Rect) -> [Rect; 2] {
+fn calculate_layout(root_rect: Rect) -> [Rect; 3] {
     let layouts = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(vec![Constraint::Percentage(50), Constraint::Percentage(50)])
+        .direction(Direction::Vertical)
+        .constraints(vec![Constraint::Percentage(100), Constraint::Min(1)])
         .split(root_rect);
 
-    return [layouts[0], layouts[1]];
+    let main_rect = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(vec![Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(layouts[0]);
+
+    return [main_rect[0], main_rect[1], layouts[1]];
 }
 
 fn render_left_panel(
