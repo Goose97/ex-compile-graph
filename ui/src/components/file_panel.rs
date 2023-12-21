@@ -186,7 +186,7 @@ mod handle_event_tests {
     #[test]
     fn up_button() {
         let mut state = State::new();
-        state.files = file_entries(&["one", "two", "three"]);
+        state.files = Some(file_entries(&["one", "two", "three"]));
         state.selected_file_index = 1;
 
         let (tx, _) = mpsc::channel::<AppEvent>();
@@ -202,7 +202,7 @@ mod handle_event_tests {
     #[test]
     fn up_button_limit() {
         let mut state = State::new();
-        state.files = file_entries(&["one", "two", "three"]);
+        state.files = Some(file_entries(&["one", "two", "three"]));
         state.selected_file_index = 0;
 
         let (tx, _) = mpsc::channel::<AppEvent>();
@@ -218,7 +218,7 @@ mod handle_event_tests {
     #[test]
     fn down_button() {
         let mut state = State::new();
-        state.files = file_entries(&["one", "two", "three"]);
+        state.files = Some(file_entries(&["one", "two", "three"]));
         state.selected_file_index = 1;
 
         let (tx, _) = mpsc::channel::<AppEvent>();
@@ -234,7 +234,7 @@ mod handle_event_tests {
     #[test]
     fn down_button_limit() {
         let mut state = State::new();
-        state.files = file_entries(&["one", "two", "three"]);
+        state.files = Some(file_entries(&["one", "two", "three"]));
         state.selected_file_index = 2;
 
         let (tx, _) = mpsc::channel::<AppEvent>();
