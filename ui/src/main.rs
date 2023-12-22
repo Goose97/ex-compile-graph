@@ -13,8 +13,10 @@ use ui::app_event::AppEvent;
 use ui::app_state::StateMachine;
 use ui::app_state::{AppState, NoopWidget};
 use ui::components::file_dependent_panel::FileDependentPanel;
-use ui::components::file_panel::FilePanel;
+use ui::components::file_panel::{filter_files_list, FilePanel};
 use ui::components::instructions::Instructions;
+use ui::components::search_input;
+use ui::components::search_input::SearchInput;
 use ui::FRAME_COUNT;
 use ui::{HandleEvent, ProduceEvent};
 
@@ -62,8 +64,18 @@ fn render(mut adapter: Adapter) -> Result<()> {
             FRAME_COUNT += 1;
         }
 
+        let files_list = match app_state.global.files_list {
+            Some(ref files) => Some(
+                filter_files_list(files, app_state.global.search_term.clone())
+                    .into_iter()
+                    .map(|f| f.to_owned())
+                    .collect(),
+            ),
+            None => None,
+        };
+
         let widget_board: WidgetBoard = WidgetBoard {
-            file_panel: FilePanel::new(),
+            file_panel: FilePanel::new(files_list),
             file_dependent_panel: app_state
                 .global
                 .selected_dependency_source
@@ -92,7 +104,21 @@ fn render(mut adapter: Adapter) -> Result<()> {
                 &mut app_state.dependency_cause_panel,
             );
 
-            f.render_widget(Instructions::new(), bottom_rect)
+            if app_state.global.searching {
+                f.render_widget(
+                    SearchInput::new(search_input::State::Prompt(
+                        app_state.global.search_input.clone(),
+                    )),
+                    bottom_rect,
+                );
+            } else if let Some(ref query) = app_state.global.search_term {
+                f.render_widget(
+                    SearchInput::new(search_input::State::Search(query.clone())),
+                    bottom_rect,
+                );
+            } else {
+                f.render_widget(Instructions::new(), bottom_rect)
+            }
         })?;
 
         adapter.poll_responses();
@@ -184,22 +210,24 @@ fn poll_terminal_event(
             app_events.push(event)
         };
 
-        match app_state.global.state_machine {
-            StateMachine::FilePanelView => {
-                if let Some(event) = app_state
-                    .file_panel
-                    .produce_event(&terminal_event, &widget_board.file_panel)
-                {
-                    app_events.push(event)
+        if !app_state.global.searching {
+            match app_state.global.state_machine {
+                StateMachine::FilePanelView => {
+                    if let Some(event) = app_state
+                        .file_panel
+                        .produce_event(&terminal_event, &widget_board.file_panel)
+                    {
+                        app_events.push(event)
+                    }
                 }
-            }
 
-            StateMachine::FileDependentsView => {
-                if let Some(event) = app_state.file_dependent_panel.produce_event(
-                    &terminal_event,
-                    &widget_board.file_dependent_panel.clone().unwrap(),
-                ) {
-                    app_events.push(event)
+                StateMachine::FileDependentsView => {
+                    if let Some(event) = app_state.file_dependent_panel.produce_event(
+                        &terminal_event,
+                        &widget_board.file_dependent_panel.clone().unwrap(),
+                    ) {
+                        app_events.push(event)
+                    }
                 }
             }
         }

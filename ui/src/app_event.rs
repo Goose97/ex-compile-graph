@@ -10,6 +10,11 @@ pub enum AppEvent {
     ViewDependentFile(DependencyLink),
     StopViewDependentFile(DependencyLink),
 
+    EnterSearch,
+    SearchInput(char),
+    SearchInputDelete,
+    SubmitSearch(String),
+
     GetFilesDone(Vec<FileEntry>),
     GetDependencyCausesDone(Vec<DependencyCause>),
 

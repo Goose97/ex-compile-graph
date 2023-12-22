@@ -17,6 +17,10 @@ pub enum StateMachine {
 pub struct GlobalState {
     pub state_machine: StateMachine,
     pub selected_dependency_source: Option<FileEntry>,
+    pub searching: bool,
+    pub search_input: String,
+    pub search_term: Option<String>,
+    pub files_list: Option<Vec<FileEntry>>,
 }
 
 pub struct AppState {
@@ -35,6 +39,12 @@ impl AppState {
             global: GlobalState {
                 state_machine: StateMachine::FilePanelView,
                 selected_dependency_source: None,
+
+                searching: false,
+                search_input: String::new(),
+                search_term: None,
+
+                files_list: None,
             },
         }
     }
@@ -65,7 +75,32 @@ impl HandleEvent for AppState {
             }
 
             AppEvent::GetFilesDone(files) => {
-                self.file_panel.files = Some(files.clone());
+                self.global.files_list = Some(files.clone());
+            }
+
+            AppEvent::EnterSearch => self.global.searching = true,
+
+            AppEvent::SearchInput(char) if self.global.searching => {
+                self.global.search_input.push(*char);
+            }
+
+            AppEvent::SearchInputDelete if self.global.searching => {
+                self.global.search_input.pop();
+            }
+
+            AppEvent::SubmitSearch(query) if self.global.searching => {
+                self.global.searching = false;
+                self.global.search_input = String::new();
+                self.global.search_term = Some(query.clone());
+            }
+
+            AppEvent::Cancel if self.global.searching => {
+                self.global.searching = false;
+                self.global.search_input = String::new();
+            }
+
+            AppEvent::Cancel if self.global.search_term.is_some() => {
+                self.global.search_term = None;
             }
 
             AppEvent::Cancel => match self.global.state_machine {
@@ -92,6 +127,18 @@ impl ProduceEvent for GlobalState {
         if let crossterm::event::Event::Key(key) = terminal_event {
             if key.kind == crossterm::event::KeyEventKind::Press {
                 return match key.code {
+                    crossterm::event::KeyCode::Char(char) if self.searching => {
+                        Some(AppEvent::SearchInput(char))
+                    }
+
+                    crossterm::event::KeyCode::Backspace if self.searching => {
+                        Some(AppEvent::SearchInputDelete)
+                    }
+
+                    crossterm::event::KeyCode::Enter if self.searching => {
+                        Some(AppEvent::SubmitSearch(self.search_input.clone()))
+                    }
+
                     crossterm::event::KeyCode::Char('j') | crossterm::event::KeyCode::Down => {
                         Some(AppEvent::DownButtonPressed)
                     }
@@ -100,6 +147,7 @@ impl ProduceEvent for GlobalState {
                         Some(AppEvent::UpButtonPressed)
                     }
 
+                    crossterm::event::KeyCode::Char('/') => Some(AppEvent::EnterSearch),
                     crossterm::event::KeyCode::Esc => Some(AppEvent::Cancel),
 
                     crossterm::event::KeyCode::Char('q') => Some(AppEvent::Quit),
@@ -119,7 +167,6 @@ mod handle_event_tests {
     use mpsc::Receiver;
 
     fn collect_events(rx: Receiver<AppEvent>) -> Vec<AppEvent> {
-        let mut count = 0;
         rx.try_iter().collect()
     }
 
@@ -133,7 +180,7 @@ mod handle_event_tests {
         });
 
         let (tx, rx) = mpsc::channel::<AppEvent>();
-        let events = state.handle_event(&event, &NoopWidget {}, &mut NoopAdapter {}, tx);
+        state.handle_event(&event, &NoopWidget {}, &mut NoopAdapter {}, tx);
         assert_eq!(collect_events(rx).len(), 0);
         assert_eq!(state.global.state_machine, StateMachine::FileDependentsView);
         assert_eq!(
@@ -154,9 +201,115 @@ mod handle_event_tests {
         let event = AppEvent::Cancel;
 
         let (tx, rx) = mpsc::channel::<AppEvent>();
-        let events = state.handle_event(&event, &NoopWidget {}, &mut NoopAdapter {}, tx);
+        state.handle_event(&event, &NoopWidget {}, &mut NoopAdapter {}, tx);
         assert_eq!(collect_events(rx).len(), 0);
         assert_eq!(state.global.state_machine, StateMachine::FilePanelView);
         assert!(state.global.selected_dependency_source.is_none());
+    }
+
+    #[test]
+    fn enter_search() {
+        let mut state = AppState::new();
+
+        let event = AppEvent::EnterSearch;
+        let (tx, rx) = mpsc::channel::<AppEvent>();
+        state.handle_event(&event, &NoopWidget {}, &mut NoopAdapter {}, tx);
+
+        assert_eq!(collect_events(rx).len(), 0);
+        assert!(state.global.searching);
+    }
+
+    #[test]
+    fn search_input() {
+        let mut state = AppState::new();
+        state.global.searching = true;
+
+        let event_a = AppEvent::SearchInput('f');
+        let event_b = AppEvent::SearchInput('o');
+        let event_c = AppEvent::SearchInput('o');
+
+        let (tx, rx) = mpsc::channel::<AppEvent>();
+        state.handle_event(&event_a, &NoopWidget {}, &mut NoopAdapter {}, tx.clone());
+        state.handle_event(&event_b, &NoopWidget {}, &mut NoopAdapter {}, tx.clone());
+        state.handle_event(&event_c, &NoopWidget {}, &mut NoopAdapter {}, tx.clone());
+
+        assert_eq!(collect_events(rx).len(), 0);
+        assert_eq!(state.global.search_input, String::from("foo"));
+    }
+
+    #[test]
+    fn search_input_delete() {
+        let mut state = AppState::new();
+        state.global.searching = true;
+        state.global.search_input = String::from("foo");
+
+        let (tx, rx) = mpsc::channel::<AppEvent>();
+        state.handle_event(
+            &AppEvent::SearchInputDelete,
+            &NoopWidget {},
+            &mut NoopAdapter {},
+            tx.clone(),
+        );
+        assert_eq!(state.global.search_input, String::from("fo"));
+
+        state.handle_event(
+            &AppEvent::SearchInputDelete,
+            &NoopWidget {},
+            &mut NoopAdapter {},
+            tx.clone(),
+        );
+        assert_eq!(state.global.search_input, String::from("f"));
+
+        state.handle_event(
+            &AppEvent::SearchInputDelete,
+            &NoopWidget {},
+            &mut NoopAdapter {},
+            tx.clone(),
+        );
+        assert_eq!(state.global.search_input, String::from(""));
+
+        state.handle_event(
+            &AppEvent::SearchInputDelete,
+            &NoopWidget {},
+            &mut NoopAdapter {},
+            tx.clone(),
+        );
+        assert_eq!(state.global.search_input, String::from(""));
+
+        assert_eq!(collect_events(rx).len(), 0);
+    }
+
+    #[test]
+    fn search_submit() {
+        let mut state = AppState::new();
+        state.global.searching = true;
+        state.global.search_input = String::from("foo");
+
+        let (tx, rx) = mpsc::channel::<AppEvent>();
+        state.handle_event(
+            &AppEvent::SubmitSearch(String::from("bar")),
+            &NoopWidget {},
+            &mut NoopAdapter {},
+            tx.clone(),
+        );
+        assert!(state.global.search_input.is_empty());
+        assert_eq!(state.global.searching, false);
+        assert_eq!(state.global.search_term, Some(String::from("bar")));
+        assert_eq!(collect_events(rx).len(), 0);
+    }
+
+    #[test]
+    fn cancel_search() {
+        let mut state = AppState::new();
+        state.global.searching = true;
+        state.global.search_input = String::from("foo");
+
+        let event = AppEvent::Cancel;
+        let (tx, rx) = mpsc::channel::<AppEvent>();
+        state.handle_event(&event, &NoopWidget {}, &mut NoopAdapter {}, tx);
+
+        assert_eq!(collect_events(rx).len(), 0);
+        assert_eq!(state.global.searching, false);
+        assert!(state.global.search_input.is_empty());
     }
 }
