@@ -4,7 +4,10 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph, StatefulWidget, Widget};
+use ratatui::widgets::{
+    Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    StatefulWidget, Widget,
+};
 use std::cmp::Reverse;
 use std::sync::mpsc;
 
@@ -106,11 +109,23 @@ impl StatefulWidget for FilePanel {
     type State = State;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut State) {
-        let rect = utils::padding(&area, 1, 1);
+        render_bounding_box(area, buf);
 
         match self.files {
             Some(ref files) => {
-                render_files_list(files, state.selected_file_index, rect, buf);
+                let files_rect = utils::padding(&area, 1, 1);
+                render_files_list(files, state, files_rect, buf);
+
+                // We have padding y of 1, hence the -2
+                let overflow = files.len() as u16 > (area.height - 2);
+                if overflow {
+                    render_scroll_bar(
+                        files.len() as u16,
+                        state.selected_file_index as u16,
+                        area,
+                        buf,
+                    );
+                }
             }
 
             None => {
@@ -122,14 +137,12 @@ impl StatefulWidget for FilePanel {
                 .add_modifier(Modifier::BOLD)
                 .alignment(Alignment::Center);
 
-                let mut clone = rect.clone();
+                let mut clone = area.clone();
                 clone.height = 1;
-                utils::center_rect_in_container(&mut clone, &rect);
+                utils::center_rect_in_container(&mut clone, &area);
                 paragraph.render(clone, buf);
             }
         }
-
-        render_bounding_box(area, buf);
     }
 }
 
@@ -161,12 +174,7 @@ pub fn filter_files_list<'a, 'b>(
     }
 }
 
-fn render_files_list(
-    files: &[FileEntry],
-    selected_file_index: usize,
-    area: Rect,
-    buf: &mut Buffer,
-) {
+fn render_files_list(files: &[FileEntry], state: &State, area: Rect, buf: &mut Buffer) {
     let text: Vec<Line> = files
         .iter()
         .enumerate()
@@ -184,7 +192,7 @@ fn render_files_list(
                 Span::from(" "),
             ]);
 
-            if selected_file_index == index {
+            if state.selected_file_index == index {
                 line.patch_style(
                     Style::default()
                         .bg(Color::Blue)
@@ -196,8 +204,32 @@ fn render_files_list(
         })
         .collect();
 
-    let paragraph = Paragraph::new(text).style(Style::default().fg(Color::White));
+    let scroll_offset = if (state.selected_file_index as u16) < area.height {
+        0
+    } else {
+        state.selected_file_index as u16 - area.height + 1
+    };
+
+    let paragraph = Paragraph::new(text[scroll_offset as usize..].to_vec())
+        .style(Style::default().fg(Color::White));
+
     paragraph.render(area, buf);
+}
+
+fn render_scroll_bar(content_length: u16, scroll_position: u16, area: Rect, buf: &mut Buffer) {
+    let scrollbar = Scrollbar::default()
+        .orientation(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(Some("▲"))
+        .end_symbol(Some("▼"))
+        .track_symbol(None)
+        .track_style(Style::default().fg(Color::Gray))
+        .thumb_style(Style::default().fg(Color::Gray));
+
+    let mut scrollbar_state = ScrollbarState::default()
+        .content_length(content_length)
+        .position(scroll_position);
+
+    scrollbar.render(area, buf, &mut scrollbar_state);
 }
 
 fn render_bounding_box(area: Rect, buf: &mut Buffer) {
