@@ -66,7 +66,7 @@ fn render(mut adapter: Adapter) -> Result<()> {
 
         let files_list = match app_state.global.files_list {
             Some(ref files) => Some(
-                filter_files_list(files, app_state.global.search_term.clone())
+                filter_files_list(files, &app_state.global.file_panel_search)
                     .into_iter()
                     .map(|f| f.to_owned())
                     .collect(),
@@ -104,21 +104,7 @@ fn render(mut adapter: Adapter) -> Result<()> {
                 &mut app_state.dependency_cause_panel,
             );
 
-            if app_state.global.searching {
-                f.render_widget(
-                    SearchInput::new(search_input::State::Prompt(
-                        app_state.global.search_input.clone(),
-                    )),
-                    bottom_rect,
-                );
-            } else if let Some(ref query) = app_state.global.search_term {
-                f.render_widget(
-                    SearchInput::new(search_input::State::Search(query.clone())),
-                    bottom_rect,
-                );
-            } else {
-                f.render_widget(Instructions::new(), bottom_rect)
-            }
+            render_footer(f, &mut app_state, bottom_rect);
         })?;
 
         adapter.poll_responses();
@@ -195,6 +181,32 @@ fn render_left_panel(
     };
 }
 
+fn render_footer(f: &mut Frame<CrosstermBackend<Stderr>>, app_state: &mut AppState, area: Rect) {
+    match app_state.global.state_machine {
+        StateMachine::FilePanelView => {
+            if app_state.global.file_panel_search.is_active() {
+                f.render_widget(
+                    SearchInput::new(app_state.global.file_panel_search.clone()),
+                    area,
+                );
+            } else {
+                f.render_widget(Instructions::new(), area)
+            }
+        }
+
+        StateMachine::FileDependentsView => {
+            if app_state.global.file_dependent_panel_search.is_active() {
+                f.render_widget(
+                    SearchInput::new(app_state.global.file_dependent_panel_search.clone()),
+                    area,
+                );
+            } else {
+                f.render_widget(Instructions::new(), area)
+            }
+        }
+    };
+}
+
 fn poll_terminal_event(
     app_state: &mut AppState,
     widget_board: &WidgetBoard,
@@ -210,9 +222,9 @@ fn poll_terminal_event(
             app_events.push(event)
         };
 
-        if !app_state.global.searching {
-            match app_state.global.state_machine {
-                StateMachine::FilePanelView => {
+        match app_state.global.state_machine {
+            StateMachine::FilePanelView => {
+                if !app_state.global.file_panel_search.is_prompting() {
                     if let Some(event) = app_state
                         .file_panel
                         .produce_event(&terminal_event, &widget_board.file_panel)
@@ -220,8 +232,10 @@ fn poll_terminal_event(
                         app_events.push(event)
                     }
                 }
+            }
 
-                StateMachine::FileDependentsView => {
+            StateMachine::FileDependentsView => {
+                if !app_state.global.file_dependent_panel_search.is_prompting() {
                     if let Some(event) = app_state.file_dependent_panel.produce_event(
                         &terminal_event,
                         &widget_board.file_dependent_panel.clone().unwrap(),

@@ -14,6 +14,7 @@ use std::sync::mpsc;
 use crate::adapter::ServerAdapter;
 use crate::app_event::AppEvent;
 use crate::components::loading_icon::LoadingIcon;
+use crate::components::search_input;
 use crate::utils;
 use crate::{FileEntry, HandleEvent, ProduceEvent};
 
@@ -68,7 +69,7 @@ impl HandleEvent for State {
                     }
                 }
 
-                AppEvent::SubmitSearch(_) => self.selected_file_index = 0,
+                AppEvent::SubmitSearch => self.selected_file_index = 0,
                 _ => (),
             }
         }
@@ -148,16 +149,16 @@ impl StatefulWidget for FilePanel {
 
 pub fn filter_files_list<'a, 'b>(
     files: &'a [FileEntry],
-    search_term: Option<String>,
+    search_term: &search_input::State,
 ) -> Vec<&'a FileEntry> {
     match search_term {
-        Some(term) => {
+        search_input::State::Search(term) => {
             let matcher = SkimMatcherV2::default();
 
             let mut filtered = files
                 .iter()
                 .filter_map(|file| {
-                    let score = matcher.fuzzy_match(&file.path, &term);
+                    let score = matcher.fuzzy_match(&file.path, term);
 
                     match score {
                         Some(score) if score > 0 => Some((file, score)),
@@ -170,7 +171,7 @@ pub fn filter_files_list<'a, 'b>(
             filtered.iter().map(|(file, _)| *file).collect()
         }
 
-        None => files.iter().collect(),
+        _ => files.iter().collect(),
     }
 }
 
@@ -325,10 +326,14 @@ mod handle_event_tests {
 mod filter_list_tests {
     use super::*;
 
+    fn term(input: &str) -> search_input::State {
+        search_input::State::Search(String::from(input))
+    }
+
     #[test]
     fn found_one() {
         let files = file_entries(&["one", "two", "three"]);
-        let filtered: Vec<&str> = filter_files_list(&files, Some(String::from("one")))
+        let filtered: Vec<&str> = filter_files_list(&files, &term("one"))
             .iter()
             .map(|f| f.path.as_str())
             .collect();
@@ -339,7 +344,7 @@ mod filter_list_tests {
     #[test]
     fn found_many_and_sort_score() {
         let files = file_entries(&["one", "two_one", "three_two"]);
-        let filtered: Vec<&str> = filter_files_list(&files, Some(String::from("one")))
+        let filtered: Vec<&str> = filter_files_list(&files, &term("one"))
             .iter()
             .map(|f| f.path.as_str())
             .collect();
@@ -350,7 +355,7 @@ mod filter_list_tests {
     #[test]
     fn found_none() {
         let files = file_entries(&["one", "two", "three"]);
-        let filtered: Vec<&str> = filter_files_list(&files, Some(String::from("four")))
+        let filtered: Vec<&str> = filter_files_list(&files, &term("four"))
             .iter()
             .map(|f| f.path.as_str())
             .collect();

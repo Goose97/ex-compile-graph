@@ -13,7 +13,7 @@ pub enum AppEvent {
     EnterSearch,
     SearchInput(char),
     SearchInputDelete,
-    SubmitSearch(String),
+    SubmitSearch,
 
     GetFilesDone(Vec<FileEntry>),
     GetDependencyCausesDone(Vec<DependencyCause>),

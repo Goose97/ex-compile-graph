@@ -5,7 +5,7 @@ use std::sync::mpsc;
 
 use crate::adapter::ServerAdapter;
 use crate::app_event::AppEvent;
-use crate::components::{dependency_cause_panel, file_dependent_panel, file_panel};
+use crate::components::{dependency_cause_panel, file_dependent_panel, file_panel, search_input};
 use crate::{FileEntry, HandleEvent, ProduceEvent};
 
 #[derive(PartialEq, Debug)]
@@ -17,9 +17,8 @@ pub enum StateMachine {
 pub struct GlobalState {
     pub state_machine: StateMachine,
     pub selected_dependency_source: Option<FileEntry>,
-    pub searching: bool,
-    pub search_input: String,
-    pub search_term: Option<String>,
+    pub file_panel_search: search_input::State,
+    pub file_dependent_panel_search: search_input::State,
     pub files_list: Option<Vec<FileEntry>>,
 }
 
@@ -40,9 +39,8 @@ impl AppState {
                 state_machine: StateMachine::FilePanelView,
                 selected_dependency_source: None,
 
-                searching: false,
-                search_input: String::new(),
-                search_term: None,
+                file_panel_search: search_input::State::default(),
+                file_dependent_panel_search: search_input::State::default(),
 
                 files_list: None,
             },
@@ -78,38 +76,57 @@ impl HandleEvent for AppState {
                 self.global.files_list = Some(files.clone());
             }
 
-            AppEvent::EnterSearch => self.global.searching = true,
+            AppEvent::EnterSearch => match self.global.state_machine {
+                StateMachine::FilePanelView => {
+                    self.global.file_panel_search.prompt_begin();
+                }
 
-            AppEvent::SearchInput(char) if self.global.searching => {
-                self.global.search_input.push(*char);
-            }
-
-            AppEvent::SearchInputDelete if self.global.searching => {
-                self.global.search_input.pop();
-            }
-
-            AppEvent::SubmitSearch(query) if self.global.searching => {
-                self.global.searching = false;
-                self.global.search_input = String::new();
-                self.global.search_term = Some(query.clone());
-            }
-
-            AppEvent::Cancel if self.global.searching => {
-                self.global.searching = false;
-                self.global.search_input = String::new();
-            }
-
-            AppEvent::Cancel if self.global.search_term.is_some() => {
-                self.global.search_term = None;
-            }
-
-            AppEvent::Cancel => match self.global.state_machine {
-                StateMachine::FilePanelView => (),
                 StateMachine::FileDependentsView => {
+                    self.global.file_dependent_panel_search.prompt_begin();
+                }
+            },
+
+            AppEvent::SearchInput(char) => match self.global.state_machine {
+                StateMachine::FilePanelView => {
+                    self.global.file_panel_search.prompt_add(*char);
+                }
+
+                StateMachine::FileDependentsView => {
+                    self.global.file_dependent_panel_search.prompt_add(*char);
+                }
+            },
+
+            AppEvent::SearchInputDelete => match self.global.state_machine {
+                StateMachine::FilePanelView => {
+                    self.global.file_panel_search.prompt_remove();
+                }
+
+                StateMachine::FileDependentsView => {
+                    self.global.file_dependent_panel_search.prompt_remove();
+                }
+            },
+
+            AppEvent::SubmitSearch => match self.global.state_machine {
+                StateMachine::FilePanelView => self.global.file_panel_search.search(),
+                StateMachine::FileDependentsView => {
+                    self.global.file_dependent_panel_search.search()
+                }
+            },
+
+            AppEvent::Cancel if self.global.state_machine == StateMachine::FilePanelView => {
+                if self.global.file_panel_search.is_active() {
+                    self.global.file_panel_search.cancel();
+                }
+            }
+
+            AppEvent::Cancel if self.global.state_machine == StateMachine::FileDependentsView => {
+                if self.global.file_dependent_panel_search.is_active() {
+                    self.global.file_dependent_panel_search.cancel();
+                } else {
                     self.global.state_machine = StateMachine::FilePanelView;
                     self.global.selected_dependency_source = None;
                 }
-            },
+            }
 
             _ => (),
         }
@@ -127,16 +144,25 @@ impl ProduceEvent for GlobalState {
         if let crossterm::event::Event::Key(key) = terminal_event {
             if key.kind == crossterm::event::KeyEventKind::Press {
                 return match key.code {
-                    crossterm::event::KeyCode::Char(char) if self.searching => {
+                    crossterm::event::KeyCode::Char(char)
+                        if self.file_panel_search.is_prompting()
+                            || self.file_dependent_panel_search.is_prompting() =>
+                    {
                         Some(AppEvent::SearchInput(char))
                     }
 
-                    crossterm::event::KeyCode::Backspace if self.searching => {
+                    crossterm::event::KeyCode::Backspace
+                        if self.file_panel_search.is_prompting()
+                            || self.file_dependent_panel_search.is_prompting() =>
+                    {
                         Some(AppEvent::SearchInputDelete)
                     }
 
-                    crossterm::event::KeyCode::Enter if self.searching => {
-                        Some(AppEvent::SubmitSearch(self.search_input.clone()))
+                    crossterm::event::KeyCode::Enter
+                        if self.file_panel_search.is_prompting()
+                            || self.file_dependent_panel_search.is_prompting() =>
+                    {
+                        Some(AppEvent::SubmitSearch)
                     }
 
                     crossterm::event::KeyCode::Char('j') | crossterm::event::KeyCode::Down => {
@@ -165,6 +191,12 @@ mod handle_event_tests {
     use super::*;
     use crate::adapter::NoopAdapter;
     use mpsc::Receiver;
+
+    fn dispatch_events(state: &mut AppState, events: &[AppEvent], tx: mpsc::Sender<AppEvent>) {
+        for event in events {
+            state.handle_event(&event, &NoopWidget {}, &mut NoopAdapter {}, tx.clone());
+        }
+    }
 
     fn collect_events(rx: Receiver<AppEvent>) -> Vec<AppEvent> {
         rx.try_iter().collect()
@@ -203,7 +235,6 @@ mod handle_event_tests {
         let (tx, rx) = mpsc::channel::<AppEvent>();
         state.handle_event(&event, &NoopWidget {}, &mut NoopAdapter {}, tx);
         assert_eq!(collect_events(rx).len(), 0);
-        assert_eq!(state.global.state_machine, StateMachine::FilePanelView);
         assert!(state.global.selected_dependency_source.is_none());
     }
 
@@ -216,13 +247,13 @@ mod handle_event_tests {
         state.handle_event(&event, &NoopWidget {}, &mut NoopAdapter {}, tx);
 
         assert_eq!(collect_events(rx).len(), 0);
-        assert!(state.global.searching);
+        assert!(state.global.file_panel_search.is_prompting());
     }
 
     #[test]
     fn search_input() {
         let mut state = AppState::new();
-        state.global.searching = true;
+        state.global.file_panel_search = search_input::State::Prompt(String::new());
 
         let event_a = AppEvent::SearchInput('f');
         let event_b = AppEvent::SearchInput('o');
@@ -234,14 +265,16 @@ mod handle_event_tests {
         state.handle_event(&event_c, &NoopWidget {}, &mut NoopAdapter {}, tx.clone());
 
         assert_eq!(collect_events(rx).len(), 0);
-        assert_eq!(state.global.search_input, String::from("foo"));
+        assert_eq!(
+            state.global.file_panel_search.prompt_input().unwrap(),
+            String::from("foo")
+        );
     }
 
     #[test]
     fn search_input_delete() {
         let mut state = AppState::new();
-        state.global.searching = true;
-        state.global.search_input = String::from("foo");
+        state.global.file_panel_search = search_input::State::Prompt(String::from("foo"));
 
         let (tx, rx) = mpsc::channel::<AppEvent>();
         state.handle_event(
@@ -250,7 +283,10 @@ mod handle_event_tests {
             &mut NoopAdapter {},
             tx.clone(),
         );
-        assert_eq!(state.global.search_input, String::from("fo"));
+        assert_eq!(
+            state.global.file_panel_search.prompt_input().unwrap(),
+            String::from("fo")
+        );
 
         state.handle_event(
             &AppEvent::SearchInputDelete,
@@ -258,7 +294,10 @@ mod handle_event_tests {
             &mut NoopAdapter {},
             tx.clone(),
         );
-        assert_eq!(state.global.search_input, String::from("f"));
+        assert_eq!(
+            state.global.file_panel_search.prompt_input().unwrap(),
+            String::from("f")
+        );
 
         state.handle_event(
             &AppEvent::SearchInputDelete,
@@ -266,7 +305,10 @@ mod handle_event_tests {
             &mut NoopAdapter {},
             tx.clone(),
         );
-        assert_eq!(state.global.search_input, String::from(""));
+        assert_eq!(
+            state.global.file_panel_search.prompt_input().unwrap(),
+            String::from("")
+        );
 
         state.handle_event(
             &AppEvent::SearchInputDelete,
@@ -274,7 +316,10 @@ mod handle_event_tests {
             &mut NoopAdapter {},
             tx.clone(),
         );
-        assert_eq!(state.global.search_input, String::from(""));
+        assert_eq!(
+            state.global.file_panel_search.prompt_input().unwrap(),
+            String::from("")
+        );
 
         assert_eq!(collect_events(rx).len(), 0);
     }
@@ -282,34 +327,107 @@ mod handle_event_tests {
     #[test]
     fn search_submit() {
         let mut state = AppState::new();
-        state.global.searching = true;
-        state.global.search_input = String::from("foo");
+        state.global.file_panel_search = search_input::State::Prompt(String::from("foo"));
 
         let (tx, rx) = mpsc::channel::<AppEvent>();
         state.handle_event(
-            &AppEvent::SubmitSearch(String::from("bar")),
+            &AppEvent::SubmitSearch,
             &NoopWidget {},
             &mut NoopAdapter {},
             tx.clone(),
         );
-        assert!(state.global.search_input.is_empty());
-        assert_eq!(state.global.searching, false);
-        assert_eq!(state.global.search_term, Some(String::from("bar")));
+        assert_eq!(
+            state.global.file_panel_search,
+            search_input::State::Search(String::from("foo"))
+        );
         assert_eq!(collect_events(rx).len(), 0);
     }
 
     #[test]
     fn cancel_search() {
         let mut state = AppState::new();
-        state.global.searching = true;
-        state.global.search_input = String::from("foo");
+        state.global.file_panel_search = search_input::State::Prompt(String::from("foo"));
 
         let event = AppEvent::Cancel;
         let (tx, rx) = mpsc::channel::<AppEvent>();
         state.handle_event(&event, &NoopWidget {}, &mut NoopAdapter {}, tx);
 
         assert_eq!(collect_events(rx).len(), 0);
-        assert_eq!(state.global.searching, false);
-        assert!(state.global.search_input.is_empty());
+        assert!(!state.global.file_panel_search.is_active());
+    }
+
+    #[test]
+    fn submit_search_select_file_then_search_again() {
+        let mut state = AppState::new();
+        state.global.file_panel_search = search_input::State::Prompt(String::from("foo"));
+
+        let (tx, rx) = mpsc::channel::<AppEvent>();
+
+        dispatch_events(
+            &mut state,
+            &[
+                AppEvent::SubmitSearch,
+                // Select file and move to the file dependents panel
+                AppEvent::SelectFile(FileEntry {
+                    path: String::from("bar"),
+                    recompile_dependencies: vec![],
+                }),
+            ],
+            tx.clone(),
+        );
+
+        assert_eq!(state.global.state_machine, StateMachine::FileDependentsView);
+        assert_eq!(
+            state.global.file_panel_search,
+            search_input::State::Search(String::from("foo"))
+        );
+
+        dispatch_events(
+            &mut state,
+            &[
+                AppEvent::EnterSearch,
+                AppEvent::SearchInput('b'),
+                AppEvent::SearchInput('a'),
+                AppEvent::SearchInput('z'),
+                AppEvent::SubmitSearch,
+            ],
+            tx.clone(),
+        );
+
+        assert!(state.global.file_dependent_panel_search.is_active());
+        assert_eq!(collect_events(rx).len(), 0);
+    }
+
+    #[test]
+    fn submit_search_select_file_then_cancel_search() {
+        let mut state = AppState::new();
+        state.global.file_panel_search = search_input::State::Prompt(String::from("foo"));
+
+        let (tx, rx) = mpsc::channel::<AppEvent>();
+
+        dispatch_events(
+            &mut state,
+            &[
+                AppEvent::SubmitSearch,
+                // Select file and move to the file dependents panel
+                AppEvent::SelectFile(FileEntry {
+                    path: String::from("bar"),
+                    recompile_dependencies: vec![],
+                }),
+            ],
+            tx.clone(),
+        );
+
+        assert_eq!(state.global.state_machine, StateMachine::FileDependentsView);
+        assert_eq!(
+            state.global.file_panel_search,
+            search_input::State::Search(String::from("foo"))
+        );
+
+        dispatch_events(&mut state, &[AppEvent::Cancel], tx.clone());
+
+        assert!(state.global.file_panel_search.is_active());
+        assert_eq!(state.global.state_machine, StateMachine::FilePanelView);
+        assert_eq!(collect_events(rx).len(), 0);
     }
 }
