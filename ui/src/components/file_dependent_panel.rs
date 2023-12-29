@@ -16,13 +16,19 @@ use crate::{
 pub struct FileDependentPanel {
     dependency_source: FilePath,
     files: Vec<RecomplileDependency>,
+    panel_title: Option<String>,
 }
 
 impl FileDependentPanel {
-    pub fn new(dependency_source: FilePath, files: Vec<RecomplileDependency>) -> Self {
+    pub fn new(
+        dependency_source: FilePath,
+        files: Vec<RecomplileDependency>,
+        panel_title: Option<String>,
+    ) -> Self {
         Self {
             dependency_source,
             files,
+            panel_title,
         }
     }
 }
@@ -337,17 +343,28 @@ impl StatefulWidget for FileDependentPanel {
 
         let paragraph = Paragraph::new(text).style(Style::default().fg(Color::White));
 
-        render_bounding_box(&self.dependency_source, area, buf);
+        render_bounding_box(&self.dependency_source, &self.panel_title, area, buf);
         paragraph.render(rect, buf);
     }
 }
 
-fn render_bounding_box(source_file: &FilePath, area: Rect, buf: &mut Buffer) {
+fn render_bounding_box(
+    source_file: &FilePath,
+    title: &Option<String>,
+    area: Rect,
+    buf: &mut Buffer,
+) {
     let filename = source_file.split("/").last().or(Some("...")).unwrap();
+
+    let mut title_line = vec![Span::from(format!("Recompile files ({})", filename))];
+
+    if let Some(text) = title {
+        title_line.push(Span::styled(text, Style::default().fg(Color::Cyan)));
+    }
 
     Block::default()
         .borders(Borders::ALL)
-        .title(format!("Recompile files ({})", filename))
+        .title(Line::from(title_line))
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::White))
         .render(area, buf);
@@ -415,6 +432,7 @@ mod handle_event_tests {
         FileDependentPanel::new(
             String::from("source"),
             recompile_dependencies(&["one", "two", "three"]),
+            None,
         )
     }
 
@@ -478,7 +496,7 @@ mod handle_event_tests {
         fn up_button_with_expand() {
             let mut files = recompile_dependencies(&["one", "two", "three"]);
             files[1].dependency_chain = dependency_chain();
-            let widget = FileDependentPanel::new(String::from("source"), files);
+            let widget = FileDependentPanel::new(String::from("source"), files, None);
 
             let mut state = State::new();
             state.expanded_file = Some(String::from("two"));
@@ -503,7 +521,7 @@ mod handle_event_tests {
         fn up_button_out_of_expand_list() {
             let mut files = recompile_dependencies(&["one", "two", "three"]);
             files[1].dependency_chain = dependency_chain();
-            let widget = FileDependentPanel::new(String::from("source"), files);
+            let widget = FileDependentPanel::new(String::from("source"), files, None);
 
             let mut state = State::new();
             state.expanded_file = Some(String::from("two"));
@@ -523,7 +541,7 @@ mod handle_event_tests {
         fn up_button_into_expand_list() {
             let mut files = recompile_dependencies(&["one", "two", "three"]);
             files[1].dependency_chain = dependency_chain();
-            let widget = FileDependentPanel::new(String::from("source"), files);
+            let widget = FileDependentPanel::new(String::from("source"), files, None);
 
             let mut state = State::new();
             state.expanded_file = Some(String::from("two"));
@@ -595,7 +613,7 @@ mod handle_event_tests {
         fn down_button_with_expand_list() {
             let mut files = recompile_dependencies(&["one", "two", "three"]);
             files[1].dependency_chain = dependency_chain();
-            let widget = FileDependentPanel::new(String::from("source"), files);
+            let widget = FileDependentPanel::new(String::from("source"), files, None);
 
             let mut state = State::new();
             state.expanded_file = Some(String::from("two"));
@@ -626,7 +644,7 @@ mod handle_event_tests {
         fn down_button_out_expand_list() {
             let mut files = recompile_dependencies(&["one", "two", "three"]);
             files[1].dependency_chain = dependency_chain();
-            let widget = FileDependentPanel::new(String::from("source"), files);
+            let widget = FileDependentPanel::new(String::from("source"), files, None);
 
             let mut state = State::new();
             state.expanded_file = Some(String::from("two"));
@@ -653,7 +671,7 @@ mod handle_event_tests {
         fn down_button_into_expand_list() {
             let mut files = recompile_dependencies(&["one", "two", "three"]);
             files[1].dependency_chain = dependency_chain();
-            let widget = FileDependentPanel::new(String::from("source"), files);
+            let widget = FileDependentPanel::new(String::from("source"), files, None);
 
             let mut state = State::new();
             state.expanded_file = Some(String::from("two"));
@@ -684,7 +702,7 @@ mod handle_event_tests {
         fn expand_file_from_initial() {
             let recompile_dependencies = recompile_dependencies(&["one", "two", "three"]);
             let widget =
-                FileDependentPanel::new(String::from("source"), recompile_dependencies.clone());
+                FileDependentPanel::new(String::from("source"), recompile_dependencies.clone(), None);
 
             let mut state = State::new();
             let event = AppEvent::SelectDependentFile(recompile_dependencies[0].clone());
@@ -697,7 +715,7 @@ mod handle_event_tests {
         fn expand_file_when_already_expanded() {
             let recompile_dependencies = recompile_dependencies(&["one", "two", "three"]);
             let widget =
-                FileDependentPanel::new(String::from("source"), recompile_dependencies.clone());
+                FileDependentPanel::new(String::from("source"), recompile_dependencies.clone(), None);
 
             let mut state = State::new();
             state.expanded_file = Some(String::from("two"));
@@ -712,7 +730,7 @@ mod handle_event_tests {
         fn collapse_file() {
             let recompile_dependencies = recompile_dependencies(&["one", "two", "three"]);
             let widget =
-                FileDependentPanel::new(String::from("source"), recompile_dependencies.clone());
+                FileDependentPanel::new(String::from("source"), recompile_dependencies.clone(), None);
 
             let mut state = State::new();
             state.expanded_file = Some(String::from("two"));
@@ -726,7 +744,7 @@ mod handle_event_tests {
         #[test]
         fn cancel_reset_state() {
             let recompile_dependencies = recompile_dependencies(&["one", "two", "three"]);
-            let widget = FileDependentPanel::new(String::from("source"), recompile_dependencies);
+            let widget = FileDependentPanel::new(String::from("source"), recompile_dependencies, None);
 
             let mut state = State::new();
             state.selected_file_index = (2, None);

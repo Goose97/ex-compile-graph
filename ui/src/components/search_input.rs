@@ -31,6 +31,14 @@ impl State {
         }
     }
 
+    pub fn is_searching(&self) -> bool {
+        match self {
+            Self::Search(_) => true,
+            Self::Prompt(_) => false,
+            _ => false,
+        }
+    }
+
     pub fn prompt_input(&self) -> Option<String> {
         match self {
             Self::Prompt(input) => Some(input.clone()),

@@ -11,17 +11,18 @@ use std::sync::mpsc;
 use crate::adapter::ServerAdapter;
 use crate::app_event::AppEvent;
 use crate::components::loading_icon::LoadingIcon;
-use crate::{utils, FilePath};
+use crate::utils;
 use crate::{FileEntry, HandleEvent, ProduceEvent};
 
 #[derive(Clone)]
 pub struct FilePanel {
     files: Option<Vec<FileEntry>>,
+    panel_title: Option<String>,
 }
 
 impl FilePanel {
-    pub fn new(files: Option<Vec<FileEntry>>) -> Self {
-        Self { files }
+    pub fn new(files: Option<Vec<FileEntry>>, panel_title: Option<String>) -> Self {
+        Self { files, panel_title }
     }
 }
 
@@ -106,7 +107,7 @@ impl StatefulWidget for FilePanel {
     type State = State;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut State) {
-        render_bounding_box(area, buf);
+        render_bounding_box(&self.panel_title, area, buf);
 
         match self.files {
             Some(ref files) => {
@@ -201,10 +202,15 @@ fn render_scroll_bar(content_length: u16, scroll_position: u16, area: Rect, buf:
     scrollbar.render(area, buf, &mut scrollbar_state);
 }
 
-fn render_bounding_box(area: Rect, buf: &mut Buffer) {
+fn render_bounding_box(title: &Option<String>, area: Rect, buf: &mut Buffer) {
+    let mut title_line = vec![Span::from("Files (with recompile dependencies count)")];
+    if let Some(text) = title {
+        title_line.push(Span::styled(text, Style::default().fg(Color::Cyan)));
+    }
+
     Block::default()
         .borders(Borders::ALL)
-        .title("Files (with recompile dependencies count)")
+        .title(Line::from(title_line))
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::White))
         .render(area, buf);
@@ -237,7 +243,7 @@ mod handle_event_tests {
         let (tx, _) = mpsc::channel::<AppEvent>();
         state.handle_event(
             &AppEvent::UpButtonPressed,
-            &FilePanel::new(Some(file_entries(&["one", "two", "three"]))),
+            &FilePanel::new(Some(file_entries(&["one", "two", "three"])), None),
             &mut noop_adapter(),
             tx,
         );
@@ -252,7 +258,7 @@ mod handle_event_tests {
         let (tx, _) = mpsc::channel::<AppEvent>();
         state.handle_event(
             &AppEvent::UpButtonPressed,
-            &FilePanel::new(Some(file_entries(&["one", "two", "three"]))),
+            &FilePanel::new(Some(file_entries(&["one", "two", "three"])), None),
             &mut noop_adapter(),
             tx,
         );
@@ -267,7 +273,7 @@ mod handle_event_tests {
         let (tx, _) = mpsc::channel::<AppEvent>();
         state.handle_event(
             &AppEvent::DownButtonPressed,
-            &FilePanel::new(Some(file_entries(&["one", "two", "three"]))),
+            &FilePanel::new(Some(file_entries(&["one", "two", "three"])), None),
             &mut noop_adapter(),
             tx,
         );
@@ -282,7 +288,7 @@ mod handle_event_tests {
         let (tx, _) = mpsc::channel::<AppEvent>();
         state.handle_event(
             &AppEvent::DownButtonPressed,
-            &FilePanel::new(Some(file_entries(&["one", "two", "three"]))),
+            &FilePanel::new(Some(file_entries(&["one", "two", "three"])), None),
             &mut noop_adapter(),
             tx,
         );

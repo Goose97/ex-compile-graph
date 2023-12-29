@@ -17,7 +17,7 @@ use ui::components::file_panel::FilePanel;
 use ui::components::instructions::Instructions;
 use ui::components::search_input::SearchInput;
 use ui::utils::filter_files_list;
-use ui::FRAME_COUNT;
+use ui::{FileEntry, RecomplileDependency, FRAME_COUNT};
 use ui::{HandleEvent, ProduceEvent};
 
 #[derive(Clone)]
@@ -64,22 +64,20 @@ fn render(mut adapter: Adapter) -> Result<()> {
             FRAME_COUNT += 1;
         }
 
-        let files_list = app_state
-            .global
-            .files_list
-            .as_ref()
-            .map(|files| filter_files_list(files, &app_state.global.file_panel_search));
+        let (files_list, file_panel_title) = get_files_list(&app_state);
 
-        let widget_board: WidgetBoard = WidgetBoard {
-            file_panel: FilePanel::new(files_list.clone()),
+        let widget_board = WidgetBoard {
+            file_panel: FilePanel::new(files_list, file_panel_title),
             file_dependent_panel: app_state.global.selected_dependency_source.as_ref().map(
                 |file| {
-                    let dependencies_list = filter_files_list(
-                        &file.recompile_dependencies,
-                        &app_state.global.file_dependent_panel_search,
-                    );
+                    let (dependencies_list, file_dependent_panel_title) =
+                        get_dependent_files_list(&app_state, file);
 
-                    FileDependentPanel::new(file.path.clone(), dependencies_list)
+                    FileDependentPanel::new(
+                        file.path.clone(),
+                        dependencies_list,
+                        file_dependent_panel_title,
+                    )
                 },
             ),
             dependency_cause_panel: DependencyCausePanel::new(
@@ -142,6 +140,57 @@ fn render(mut adapter: Adapter) -> Result<()> {
     println!("{}", exit_output);
 
     Ok(())
+}
+
+fn get_files_list(app_state: &AppState) -> (Option<Vec<FileEntry>>, Option<String>) {
+    let filtered_files_list = app_state
+        .global
+        .files_list
+        .as_ref()
+        .map(|files| filter_files_list(files, &app_state.global.file_panel_search));
+
+    let total_files_count = app_state
+        .global
+        .files_list
+        .as_ref()
+        .map(|f| f.len())
+        .unwrap_or(0);
+    let total_filtered_files_count = filtered_files_list.as_ref().map(|f| f.len()).unwrap_or(0);
+
+    let title = if app_state.global.file_panel_search.is_searching() {
+        Some(format!(
+            " ({} of {})",
+            total_filtered_files_count, total_files_count
+        ))
+    } else {
+        None
+    };
+
+    return (filtered_files_list, title);
+}
+
+fn get_dependent_files_list(
+    app_state: &AppState,
+    file_entry: &FileEntry,
+) -> (Vec<RecomplileDependency>, Option<String>) {
+    let filtered_dependencies_list = filter_files_list(
+        &file_entry.recompile_dependencies,
+        &app_state.global.file_dependent_panel_search,
+    );
+
+    let total_files_count = file_entry.recompile_dependencies.len();
+    let total_filtered_files_count = filtered_dependencies_list.len();
+
+    let panel_title = if app_state.global.file_dependent_panel_search.is_searching() {
+        Some(format!(
+            " ({} of {})",
+            total_filtered_files_count, total_files_count
+        ))
+    } else {
+        None
+    };
+
+    return (filtered_dependencies_list, panel_title);
 }
 
 fn calculate_layout(root_rect: Rect) -> [Rect; 3] {
