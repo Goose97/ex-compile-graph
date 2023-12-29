@@ -13,10 +13,10 @@ use ui::app_event::AppEvent;
 use ui::app_state::StateMachine;
 use ui::app_state::{AppState, NoopWidget};
 use ui::components::file_dependent_panel::FileDependentPanel;
-use ui::components::file_panel::{filter_files_list, FilePanel};
+use ui::components::file_panel::FilePanel;
 use ui::components::instructions::Instructions;
-use ui::components::search_input;
 use ui::components::search_input::SearchInput;
+use ui::utils::filter_files_list;
 use ui::FRAME_COUNT;
 use ui::{HandleEvent, ProduceEvent};
 
@@ -64,29 +64,30 @@ fn render(mut adapter: Adapter) -> Result<()> {
             FRAME_COUNT += 1;
         }
 
-        let files_list = match app_state.global.files_list {
-            Some(ref files) => Some(
-                filter_files_list(files, &app_state.global.file_panel_search)
-                    .into_iter()
-                    .map(|f| f.to_owned())
-                    .collect(),
-            ),
-            None => None,
-        };
+        let files_list = app_state
+            .global
+            .files_list
+            .as_ref()
+            .map(|files| filter_files_list(files, &app_state.global.file_panel_search));
 
         let widget_board: WidgetBoard = WidgetBoard {
-            file_panel: FilePanel::new(files_list),
-            file_dependent_panel: app_state
-                .global
-                .selected_dependency_source
-                .clone()
-                .map(|file| FileDependentPanel::new(file.path, file.recompile_dependencies)),
+            file_panel: FilePanel::new(files_list.clone()),
+            file_dependent_panel: app_state.global.selected_dependency_source.as_ref().map(
+                |file| {
+                    let dependencies_list = filter_files_list(
+                        &file.recompile_dependencies,
+                        &app_state.global.file_dependent_panel_search,
+                    );
+
+                    FileDependentPanel::new(file.path.clone(), dependencies_list)
+                },
+            ),
             dependency_cause_panel: DependencyCausePanel::new(
                 app_state
                     .global
                     .selected_dependency_source
-                    .clone()
-                    .map(|f| f.path),
+                    .as_ref()
+                    .map(|f| f.path.clone()),
             ),
         };
 

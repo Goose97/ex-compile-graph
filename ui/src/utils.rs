@@ -1,6 +1,11 @@
-use std::cmp;
-
+use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use std::cmp;
+use std::cmp::Reverse;
+
+use crate::components::search_input;
+use crate::FilePath;
 
 #[allow(dead_code)]
 pub fn max_height(rect: &Rect, max: u16) -> Rect {
@@ -118,6 +123,34 @@ pub fn compact_file_path(file_path: &str, maximum: usize) -> String {
     result.join("/")
 }
 
+pub fn filter_files_list<'a, 'b, T: Into<FilePath> + Clone>(
+    files: &'a [T],
+    search_term: &search_input::State,
+) -> Vec<T> {
+    match search_term {
+        search_input::State::Search(term) => {
+            let matcher = SkimMatcherV2::default();
+
+            let mut filtered = files
+                .iter()
+                .filter_map(|file| {
+                    let file_path: FilePath = file.clone().into();
+                    let score = matcher.fuzzy_match(&file_path, term);
+
+                    match score {
+                        Some(score) if score > 0 => Some((file, score)),
+                        _ => None,
+                    }
+                })
+                .collect::<Vec<(&T, i64)>>();
+
+            filtered.sort_by_key(|item| Reverse(item.1));
+            filtered.into_iter().map(|(file, _)| file.clone()).collect()
+        }
+
+        _ => files.to_vec(),
+    }
+}
 
 #[cfg(test)]
 mod max_height_tests {
@@ -381,5 +414,58 @@ mod compact_file_path_tests {
         let path = "a/b/c/d";
         let result = compact_file_path(path, 5);
         assert_eq!(result, ".../d");
+    }
+}
+
+#[cfg(test)]
+mod filter_list_tests {
+    use super::*;
+    use crate::FileEntry;
+
+    fn term(input: &str) -> search_input::State {
+        search_input::State::Search(String::from(input))
+    }
+
+    #[test]
+    fn found_one() {
+        let files = file_entries(&["one", "two", "three"]);
+        let filtered: Vec<String> = filter_files_list(&files, &term("one"))
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+
+        assert_eq!(filtered, vec!["one"]);
+    }
+
+    #[test]
+    fn found_many_and_sort_score() {
+        let files = file_entries(&["one", "two_one", "three_two"]);
+        let filtered: Vec<String> = filter_files_list(&files, &term("one"))
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+
+        assert_eq!(filtered, vec!["one", "two_one"]);
+    }
+
+    #[test]
+    fn found_none() {
+        let files = file_entries(&["one", "two", "three"]);
+        let filtered: Vec<String> = filter_files_list(&files, &term("four"))
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+
+        assert!(filtered.is_empty());
+    }
+
+    fn file_entries(files: &[&str]) -> Vec<FileEntry> {
+        files
+            .into_iter()
+            .map(|f| FileEntry {
+                path: f.to_string(),
+                recompile_dependencies: vec![],
+            })
+            .collect()
     }
 }

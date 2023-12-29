@@ -106,8 +106,20 @@ pub trait ProduceEvent {
     fn produce_event(
         &mut self,
         _terminal_event: &crossterm::event::Event,
-        widget: &Self::Widget,
+        _widget: &Self::Widget,
     ) -> Option<AppEvent> {
         None
+    }
+}
+
+impl Into<FilePath> for FileEntry {
+    fn into(self) -> FilePath {
+        self.path
+    }
+}
+
+impl Into<FilePath> for RecomplileDependency {
+    fn into(self) -> FilePath {
+        self.path
     }
 }

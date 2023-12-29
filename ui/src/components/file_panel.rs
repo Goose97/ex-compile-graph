@@ -1,5 +1,3 @@
-use fuzzy_matcher::skim::SkimMatcherV2;
-use fuzzy_matcher::FuzzyMatcher;
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
@@ -8,14 +6,12 @@ use ratatui::widgets::{
     Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
     StatefulWidget, Widget,
 };
-use std::cmp::Reverse;
 use std::sync::mpsc;
 
 use crate::adapter::ServerAdapter;
 use crate::app_event::AppEvent;
 use crate::components::loading_icon::LoadingIcon;
-use crate::components::search_input;
-use crate::utils;
+use crate::{utils, FilePath};
 use crate::{FileEntry, HandleEvent, ProduceEvent};
 
 #[derive(Clone)]
@@ -147,34 +143,6 @@ impl StatefulWidget for FilePanel {
     }
 }
 
-pub fn filter_files_list<'a, 'b>(
-    files: &'a [FileEntry],
-    search_term: &search_input::State,
-) -> Vec<&'a FileEntry> {
-    match search_term {
-        search_input::State::Search(term) => {
-            let matcher = SkimMatcherV2::default();
-
-            let mut filtered = files
-                .iter()
-                .filter_map(|file| {
-                    let score = matcher.fuzzy_match(&file.path, term);
-
-                    match score {
-                        Some(score) if score > 0 => Some((file, score)),
-                        _ => None,
-                    }
-                })
-                .collect::<Vec<(&FileEntry, i64)>>();
-
-            filtered.sort_by_key(|item| Reverse(item.1));
-            filtered.iter().map(|(file, _)| *file).collect()
-        }
-
-        _ => files.iter().collect(),
-    }
-}
-
 fn render_files_list(files: &[FileEntry], state: &State, area: Rect, buf: &mut Buffer) {
     let text: Vec<Line> = files
         .iter()
@@ -251,6 +219,16 @@ mod handle_event_tests {
         NoopAdapter::new()
     }
 
+    fn file_entries(files: &[&str]) -> Vec<FileEntry> {
+        files
+            .into_iter()
+            .map(|f| FileEntry {
+                path: f.to_string(),
+                recompile_dependencies: vec![],
+            })
+            .collect()
+    }
+
     #[test]
     fn up_button() {
         let mut state = State::new();
@@ -309,67 +287,5 @@ mod handle_event_tests {
             tx,
         );
         assert_eq!(state.selected_file_index, 2);
-    }
-
-    fn file_entries(files: &[&str]) -> Vec<FileEntry> {
-        files
-            .into_iter()
-            .map(|f| FileEntry {
-                path: f.to_string(),
-                recompile_dependencies: vec![],
-            })
-            .collect()
-    }
-}
-
-#[cfg(test)]
-mod filter_list_tests {
-    use super::*;
-
-    fn term(input: &str) -> search_input::State {
-        search_input::State::Search(String::from(input))
-    }
-
-    #[test]
-    fn found_one() {
-        let files = file_entries(&["one", "two", "three"]);
-        let filtered: Vec<&str> = filter_files_list(&files, &term("one"))
-            .iter()
-            .map(|f| f.path.as_str())
-            .collect();
-
-        assert_eq!(filtered, vec!["one"]);
-    }
-
-    #[test]
-    fn found_many_and_sort_score() {
-        let files = file_entries(&["one", "two_one", "three_two"]);
-        let filtered: Vec<&str> = filter_files_list(&files, &term("one"))
-            .iter()
-            .map(|f| f.path.as_str())
-            .collect();
-
-        assert_eq!(filtered, vec!["one", "two_one"]);
-    }
-
-    #[test]
-    fn found_none() {
-        let files = file_entries(&["one", "two", "three"]);
-        let filtered: Vec<&str> = filter_files_list(&files, &term("four"))
-            .iter()
-            .map(|f| f.path.as_str())
-            .collect();
-
-        assert!(filtered.is_empty());
-    }
-
-    fn file_entries(files: &[&str]) -> Vec<FileEntry> {
-        files
-            .into_iter()
-            .map(|f| FileEntry {
-                path: f.to_string(),
-                recompile_dependencies: vec![],
-            })
-            .collect()
     }
 }
